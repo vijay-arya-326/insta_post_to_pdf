@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Instagram post to PDF</title>
+    <style>
+      :root {
+        --bg: #0f1115;
+        --panel: #181c24;
+        --text: #f4f6fb;
+        --muted: #9aa3b5;
+        --line: #2a3140;
+        --accent: #f4f6fb;
+        --accent-text: #0f1115;
+        --danger: #ff8b8b;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif;
+        background:
+          radial-gradient(1200px 500px at 10% -10%, #2a1a3a 0%, transparent 55%),
+          radial-gradient(900px 400px at 100% 0%, #1a2a3a 0%, transparent 50%),
+          var(--bg);
+        color: var(--text);
+      }
+      main {
+        width: min(920px, calc(100% - 32px));
+        margin: 48px auto 80px;
+      }
+      h1 {
+        font-size: 2rem;
+        letter-spacing: -0.03em;
+        margin: 0 0 8px;
+      }
+      .lede {
+        color: var(--muted);
+        margin: 0 0 28px;
+        line-height: 1.5;
+      }
+      .card {
+        background: color-mix(in srgb, var(--panel) 88%, transparent);
+        border: 1px solid var(--line);
+        border-radius: 16px;
+        padding: 20px;
+        backdrop-filter: blur(12px);
+      }
+      label {
+        display: block;
+        font-size: 0.85rem;
+        color: var(--muted);
+        margin-bottom: 8px;
+      }
+      .row {
+        display: flex;
+        gap: 10px;
+        flex-wrap: wrap;
+      }
+      input[type="url"] {
+        flex: 1 1 280px;
+        min-width: 0;
+        background: #0d1016;
+        color: var(--text);
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        padding: 12px 14px;
+        font-size: 1rem;
+      }
+      input[type="url"]:focus {
+        outline: 2px solid #6ea8ff;
+        border-color: transparent;
+      }
+      button {
+        border: 0;
+        border-radius: 10px;
+        padding: 12px 16px;
+        font-size: 0.95rem;
+        font-weight: 600;
+        cursor: pointer;
+      }
+      button.primary {
+        background: var(--accent);
+        color: var(--accent-text);
+      }
+      button.ghost {
+        background: transparent;
+        color: var(--text);
+        border: 1px solid var(--line);
+      }
+      button:disabled {
+        opacity: 0.55;
+        cursor: not-allowed;
+      }
+      .status {
+        min-height: 1.4em;
+        margin: 14px 0 0;
+        color: var(--muted);
+      }
+      .status.error {
+        color: var(--danger);
+      }
+      .meta {
+        margin-top: 18px;
+        color: var(--muted);
+        font-size: 0.92rem;
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+        gap: 12px;
+        margin-top: 16px;
+      }
+      .slide {
+        background: #0d1016;
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        overflow: hidden;
+      }
+      .slide img {
+        display: block;
+        width: 100%;
+        height: 160px;
+        object-fit: cover;
+      }
+      .slide span {
+        display: block;
+        padding: 8px 10px;
+        font-size: 0.8rem;
+        color: var(--muted);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Instagram post to PDF</h1>
+      <p class="lede">
+        Paste a public Instagram photo post. Every carousel slide
+        (<code>?img_index=1</code> through the last slide) becomes a page in a PDF.
+        Image posts only — no login.
+      </p>
+      <div class="card">
+        <label for="url">Instagram URL</label>
+        <div class="row">
+          <input
+            id="url"
+            type="url"
+            placeholder="https://www.instagram.com/p/..."
+            autocomplete="off"
+          />
+          <button class="ghost" id="previewBtn" type="button">Preview</button>
+          <button class="primary" id="pdfBtn" type="button">Download PDF</button>
+        </div>
+        <p class="status" id="status"></p>
+        <div class="meta" id="meta" hidden></div>
+        <div class="grid" id="grid"></div>
+      </div>
+    </main>
+    <script>
+      const urlInput = document.getElementById("url");
+      const previewBtn = document.getElementById("previewBtn");
+      const pdfBtn = document.getElementById("pdfBtn");
+      const statusEl = document.getElementById("status");
+      const metaEl = document.getElementById("meta");
+      const gridEl = document.getElementById("grid");
+
+      function setBusy(busy) {
+        previewBtn.disabled = busy;
+        pdfBtn.disabled = busy;
+      }
+
+      function setStatus(message, isError = false) {
+        statusEl.textContent = message;
+        statusEl.classList.toggle("error", isError);
+      }
+
+      function payload() {
+        return JSON.stringify({ url: urlInput.value.trim() });
+      }
+
+      async function readError(response) {
+        let detail = "Something went wrong.";
+        try {
+          const data = await response.json();
+          detail = data.detail || detail;
+        } catch {}
+        throw new Error(detail);
+      }
+
+      previewBtn.addEventListener("click", async () => {
+        gridEl.innerHTML = "";
+        metaEl.hidden = true;
+        if (!urlInput.value.trim()) {
+          setStatus("Paste an Instagram post URL first.", true);
+          return;
+        }
+        setBusy(true);
+        setStatus("Loading photos…");
+        try {
+          const response = await fetch("/api/preview", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: payload(),
+          });
+          if (!response.ok) await readError(response);
+          const data = await response.json();
+          metaEl.hidden = false;
+          metaEl.textContent = `${data.count} photo${data.count === 1 ? "" : "s"} from ${data.shortcode} (img_index 1–${data.count}).`;
+          for (const slide of data.slides) {
+            const card = document.createElement("div");
+            card.className = "slide";
+            card.innerHTML = `<img alt="Slide ${slide.index}" src="${slide.preview}" /><span>Slide ${slide.index} · ${slide.width}×${slide.height}</span>`;
+            gridEl.appendChild(card);
+          }
+          setStatus("Ready to download.");
+        } catch (err) {
+          setStatus(err.message, true);
+        } finally {
+          setBusy(false);
+        }
+      });
+
+      pdfBtn.addEventListener("click", async () => {
+        if (!urlInput.value.trim()) {
+          setStatus("Paste an Instagram post URL first.", true);
+          return;
+        }
+        setBusy(true);
+        setStatus("Building PDF…");
+        try {
+          const response = await fetch("/api/pdf", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: payload(),
+          });
+          if (!response.ok) await readError(response);
+          const blob = await response.blob();
+          const disposition = response.headers.get("Content-Disposition") || "";
+          const star = disposition.match(/filename\*=UTF-8''([^;]+)/);
+          const match = disposition.match(/filename=\"([^\"]+)\"/);
+          const name = star
+            ? decodeURIComponent(star[1])
+            : match
+              ? match[1]
+              : "instagram-post.pdf";
+          const href = URL.createObjectURL(blob);
+          const a = document.createElement("a");
+          a.href = href;
+          a.download = name;
+          a.click();
+          URL.revokeObjectURL(href);
+          setStatus("PDF downloaded.");
+        } catch (err) {
+          setStatus(err.message, true);
+        } finally {
+          setBusy(false);
+        }
+      });
+
+      urlInput.addEventListener("keydown", (event) => {
+        if (event.key === "Enter") previewBtn.click();
+      });
+    </script>
+  </body>
+</html>

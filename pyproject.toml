@@ -1,0 +1,14 @@
+[project]
+name = "insta-post-to-pdf"
+version = "0.1.0"
+description = "Local web app that turns a public Instagram post into a PDF"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.116.1",
+    "httpx>=0.28.1",
+    "img2pdf>=0.6.1",
+    "pillow>=11.3.0",
+    "uvicorn[standard]>=0.35.0",
+    "yt-dlp>=2025.9.5",
+]
