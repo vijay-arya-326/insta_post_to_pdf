@@ -278,6 +278,14 @@
         line-height: 1.4;
         white-space: pre-line;
       }
+      .status-row {
+        display: block;
+        line-height: 1.6;
+      }
+      .status-row--error {
+        color: #ff6b6b;
+        font-size: 0.88rem;
+      }
     </style>
   </head>
   <body>
@@ -739,9 +747,20 @@
       }
 
       function setYtStatus(message, isError = false, isSuccess = false) {
-        ytStatus.textContent = message;
+        ytStatus.innerHTML = "";
         ytStatus.classList.toggle("error", isError);
         ytStatus.classList.toggle("success", Boolean(isSuccess) && !isError);
+        if (typeof message === "string") {
+          ytStatus.textContent = message;
+        } else if (Array.isArray(message)) {
+          // Each item: { text, error? }
+          message.forEach((item) => {
+            const span = document.createElement("span");
+            span.className = item.error ? "status-row status-row--error" : "status-row";
+            span.textContent = item.text;
+            ytStatus.appendChild(span);
+          });
+        }
       }
 
       function hideFfmpegInstall() {
@@ -964,7 +983,7 @@
             const entries = ytLastPreview.entries;
             const folder = ytLastPreview.library_folder || ytLastPreview.title;
             let ok = 0;
-            const failed = [];
+            const failed = []; // { title, error }
             hideYtProgress();
             showYtProgress(1, entries.length, entries[0].title, folder, "Starting download");
             for (let i = 0; i < entries.length; i++) {
@@ -997,20 +1016,34 @@
                   showFfmpegInstall(err.install, err.message);
                   throw err;
                 }
-                failed.push(entry.title);
-                setYtStatus(`Step ${i + 1} of ${entries.length}: failed ${entry.title}`, true);
+                failed.push({ title: entry.title, error: err.message || "Unknown error" });
+                setYtStatus(`Step ${i + 1} of ${entries.length}: failed — ${entry.title}`, true);
               }
             }
             showYtProgress(entries.length, entries.length, "Playlist complete", folder, "Done", 100);
-            const summary = failed.length
-              ? `Playlist finished with errors.\nSaved ${ok} of ${entries.length} to:\n${folder}\nFailed: ${failed.join(", ")}`
-              : `Playlist download complete.\nSaved ${ok} of ${entries.length} videos to:\n${folder}`;
-            setYtStatus(summary, failed.length > 0, failed.length === 0);
             if (failed.length) {
-              window.alert(summary);
+              // Build multi-row status: summary line + one red row per failure
+              const rows = [
+                { text: `Saved ${ok} of ${entries.length} videos. ${failed.length} failed:` },
+                ...failed.map((f) => ({ text: `✕ ${f.title} — ${f.error}`, error: true })),
+              ];
+              setYtStatus(rows, true, false);
+              window.alert("Completed with errors.");
+              // Show a Reload button instead of auto-reloading
+              const reloadBtn = document.createElement("button");
+              reloadBtn.textContent = "Reload";
+              reloadBtn.className = "ghost";
+              reloadBtn.style.marginTop = "10px";
+              reloadBtn.addEventListener("click", () => window.location.reload());
+              ytStatus.appendChild(reloadBtn);
             } else {
+              setYtStatus(
+                `Playlist download complete. Saved ${ok} of ${entries.length} videos to: ${folder}`,
+                false,
+                true
+              );
               await new Promise((resolve) => setTimeout(resolve, 2000));
-              window.alert(summary);
+              window.alert(`Playlist download complete.\nSaved ${ok} of ${entries.length} videos to:\n${folder}`);
               window.location.reload();
             }
           } else {
