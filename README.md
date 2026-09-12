@@ -139,7 +139,7 @@ Each photo is one PDF page, at the original image size.
 3. For MP4, pick video quality: **Best available**, **1080p**, **720p**, or **480p**.  
    For MP3, pick bitrate: **320**, **256**, or **192 kbps**.
 4. Click **Preview**, then **Download**. Download stays disabled until preview succeeds. If you change the URL, preview again first.
-5. Playlist links list every video. Leave **Download all videos one by one** checked: each file finishes before the next starts. Uncheck it to save only the first video.
+5. Playlist links list every video. Leave **Save all videos one by one** checked: each file is written into your **Videos** folder (macOS: **Movies**) in a folder named after the playlist. A progress bar shows the current step. Uncheck it to download only the first video in the browser.
 
 Install ffmpeg if the tab says it was not found (Windows: `winget install Gyan.FFmpeg`, macOS: `brew install ffmpeg`, Ubuntu: `sudo apt install ffmpeg`).
 

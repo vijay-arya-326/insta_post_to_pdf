@@ -20,6 +20,8 @@ from youtube import (
     YoutubeError,
     available_options,
     download_video,
+    get_job_progress,
+    playlist_library_dir,
     preview_video,
 )
 
@@ -43,6 +45,8 @@ class YoutubeBody(BaseModel):
     video_quality: str = "best"
     audio_quality: str = "192"
     filename: str = ""
+    playlist_title: str = ""
+    job_id: str = ""
 
 
 def pdf_filename(title: str | None, caption: str | None, shortcode: str) -> str:
@@ -183,6 +187,7 @@ async def youtube_preview(body: UrlBody) -> dict[str, Any]:
         "url": info.webpage_url,
         "is_playlist": info.is_playlist,
         "count": len(info.entries) if info.entries else 1,
+        "library_folder": str(playlist_library_dir(info.title)) if info.is_playlist or (info.entries and len(info.entries) > 1) else None,
         "entries": [
             {
                 "id": entry.id,
@@ -224,3 +229,32 @@ async def youtube_download(body: YoutubeBody) -> FileResponse:
         headers={"Content-Disposition": _disposition(filename)},
         background=BackgroundTask(cleanup),
     )
+
+
+@app.post("/api/youtube/save")
+async def youtube_save(body: YoutubeBody) -> dict[str, Any]:
+    dest = playlist_library_dir(body.playlist_title or "YouTube playlist", create=True)
+    try:
+        info, path = await download_video(
+            body.url,
+            dest,
+            body.format,
+            body.video_quality,
+            body.audio_quality,
+            body.filename,
+            body.job_id,
+        )
+    except YoutubeError as exc:
+        raise _youtube_http_error(exc) from exc
+    return {
+        "ok": True,
+        "title": info.title,
+        "path": str(path),
+        "folder": str(dest),
+        "filename": path.name,
+    }
+
+
+@app.get("/api/youtube/job/{job_id}")
+async def youtube_job(job_id: str) -> dict[str, Any]:
+    return get_job_progress(job_id)

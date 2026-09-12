@@ -6,12 +6,15 @@ import re
 import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
+from threading import Lock
 from urllib.parse import parse_qs, urlparse
 
 from yt_dlp import YoutubeDL
 from yt_dlp.utils import DownloadError, ExtractorError
 
 YOUTUBE_HOSTS = ("youtube.com", "youtu.be", "youtube-nocookie.com", "music.youtube.com")
+_JOBS: dict[str, dict] = {}
+_JOBS_LOCK = Lock()
 
 VIDEO_QUALITIES = (
     {"id": "best", "label": "Best available", "help": "Highest video and audio yt-dlp can merge to MP4"},
@@ -76,6 +79,72 @@ def ffmpeg_install_guide() -> dict[str, str | list[str]]:
     }
 
 
+def set_job_progress(job_id: str, **fields: object) -> None:
+    if not job_id:
+        return
+    with _JOBS_LOCK:
+        current = dict(_JOBS.get(job_id) or {})
+        current.update(fields)
+        _JOBS[job_id] = current
+
+
+def get_job_progress(job_id: str) -> dict:
+    with _JOBS_LOCK:
+        return dict(_JOBS.get(job_id) or {})
+
+
+def _ffmpeg_label(postprocessor: str) -> str:
+    name = (postprocessor or "").lower()
+    if "extractaudio" in name:
+        return "Converting audio with ffmpeg"
+    if "remux" in name or "merger" in name or "convert" in name:
+        return "Merging with ffmpeg"
+    if "ffmpeg" in name or "fixup" in name:
+        return "Processing with ffmpeg"
+    if postprocessor:
+        return f"Processing ({postprocessor})"
+    return "Processing with ffmpeg"
+
+
+def _progress_hook(job_id: str):
+    def hook(data: dict) -> None:
+        status = data.get("status")
+        if status == "downloading":
+            total = data.get("total_bytes") or data.get("total_bytes_estimate") or 0
+            downloaded = data.get("downloaded_bytes") or 0
+            percent = round(downloaded * 100 / total, 1) if total else None
+            speed = str(data.get("_speed_str") or "").strip()
+            detail = "Downloading"
+            if percent is not None:
+                detail = f"Downloading {percent:.0f}%"
+            if speed and speed != "NA":
+                detail = f"{detail} ({speed})"
+            set_job_progress(job_id, phase="downloading", label=detail, percent=percent)
+        elif status == "finished":
+            set_job_progress(
+                job_id,
+                phase="processing",
+                label="Processing with ffmpeg",
+                percent=None,
+            )
+        elif status == "error":
+            set_job_progress(job_id, phase="error", label="Download error")
+
+    return hook
+
+
+def _postprocessor_hook(job_id: str):
+    def hook(data: dict) -> None:
+        status = data.get("status")
+        label = _ffmpeg_label(str(data.get("postprocessor") or ""))
+        if status in {"started", "processing"}:
+            set_job_progress(job_id, phase="processing", label=label)
+        elif status == "finished":
+            set_job_progress(job_id, phase="saving", label="Saving file")
+
+    return hook
+
+
 def ffmpeg_missing_error() -> YoutubeError:
     return YoutubeError(
         "ffmpeg is required for MP4 merge and MP3 conversion.",
@@ -110,12 +179,13 @@ def available_options() -> dict:
         "video_quality": list(VIDEO_QUALITIES),
         "audio_quality": list(AUDIO_QUALITIES),
         "notes": [
-            "Uses yt-dlp. Playlists download one video at a time: each file finishes before the next starts.",
+            "Playlists save into your Videos folder (Movies on macOS), in a folder named after the playlist. Each video finishes before the next starts.",
             "MP4 merge and MP3 conversion need ffmpeg on PATH.",
             "Best MP4 prefers mp4/m4a streams, then remuxes other codecs into MP4.",
         ],
         "ffmpeg": shutil.which("ffmpeg") is not None,
         "ffmpeg_install": ffmpeg_install_guide(),
+        "library_root": str(user_videos_library()),
     }
 
 
@@ -179,21 +249,30 @@ def _extract_sync(url: str, *, allow_playlist: bool = False, extract_flat: bool 
 
 
 def _download_sync(
-    url: str, dest_dir: Path, kind: str, video_quality: str, audio_quality: str
+    url: str,
+    dest_dir: Path,
+    kind: str,
+    video_quality: str,
+    audio_quality: str,
+    job_id: str = "",
 ) -> tuple[dict, Path]:
     if kind in {"mp4", "mp3"} and not shutil.which("ffmpeg"):
         raise ffmpeg_missing_error()
 
     dest_dir.mkdir(parents=True, exist_ok=True)
-    # Use the video id only. User titles can contain % and other
-    # characters that yt-dlp treats as output-template syntax.
     outtmpl = str(dest_dir / "%(id)s.%(ext)s")
     opts: dict = {
         **_base_opts(),
         "format": _format_selector(kind, video_quality),
         "outtmpl": outtmpl,
         "restrictfilenames": True,
+        "noprogress": not bool(job_id),
+        "no_color": True,
     }
+    if job_id:
+        set_job_progress(job_id, phase="starting", label="Starting download")
+        opts["progress_hooks"] = [_progress_hook(job_id)]
+        opts["postprocessor_hooks"] = [_postprocessor_hook(job_id)]
     if kind == "mp4":
         opts["merge_output_format"] = "mp4"
         opts["final_ext"] = "mp4"
@@ -337,6 +416,7 @@ async def download_video(
     video_quality: str,
     audio_quality: str,
     output_name: str = "",
+    job_id: str = "",
 ) -> tuple[YoutubeInfo, Path]:
     url = assert_youtube_url(url)
     if kind not in {"mp4", "mp3"}:
@@ -349,7 +429,7 @@ async def download_video(
         raise YoutubeError("Unknown audio quality.")
     try:
         info, path = await asyncio.to_thread(
-            _download_sync, url, dest_dir, kind, video_quality, audio_quality
+            _download_sync, url, dest_dir, kind, video_quality, audio_quality, job_id
         )
         meta = _info_from_raw(info)
     except YoutubeError:
@@ -367,6 +447,8 @@ async def download_video(
         if final_path.exists():
             final_path.unlink()
         path = path.replace(final_path)
+    if job_id:
+        set_job_progress(job_id, phase="complete", label="Saved")
     return meta, path
 
 
@@ -382,6 +464,30 @@ def _from_ydl_error(exc: BaseException) -> YoutubeError:
 
 
 _SAFE_NAME = re.compile(r"[\\/:*?\"<>|]+")
+
+
+def sanitize_folder_name(name: str) -> str:
+    source = name.strip()
+    source = _SAFE_NAME.sub(" ", source)
+    source = source.replace("%", "")
+    source = re.sub(r"\s+", " ", source).strip(" .")
+    if len(source) > 80:
+        source = source[:80].rstrip(" .")
+    return source or "YouTube playlist"
+
+
+def user_videos_library() -> Path:
+    home = Path.home()
+    if platform.system() == "Darwin":
+        return home / "Movies"
+    return home / "Videos"
+
+
+def playlist_library_dir(playlist_title: str, *, create: bool = False) -> Path:
+    dest = user_videos_library() / sanitize_folder_name(playlist_title)
+    if create:
+        dest.mkdir(parents=True, exist_ok=True)
+    return dest
 
 
 def sanitize_download_name(name: str, ext: str) -> str:

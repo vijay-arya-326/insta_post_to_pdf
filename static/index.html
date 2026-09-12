@@ -154,9 +154,10 @@
         min-height: 1.4em;
         margin: 14px 0 0;
         color: var(--muted);
+        white-space: pre-line;
       }
-      .status.error {
-        color: var(--danger);
+      .status.success {
+        color: #8dffb0;
       }
       .install {
         margin-top: 16px;
@@ -227,14 +228,32 @@
         border-radius: 10px;
         border: 1px solid var(--line);
       }
-      .playlist {
+      .progress {
+        margin-top: 16px;
+        display: none;
+      }
+      .progress.visible {
+        display: block;
+      }
+      .progress-track {
+        height: 10px;
+        border-radius: 999px;
+        background: #0d1016;
+        border: 1px solid var(--line);
+        overflow: hidden;
+      }
+      .progress-fill {
+        height: 100%;
+        width: 0;
+        background: #6ea8ff;
+        transition: width 0.2s ease;
+      }
+      .progress-label {
         margin: 8px 0 0;
-        padding-left: 1.2em;
-        color: var(--muted);
         font-size: 0.88rem;
-        line-height: 1.45;
-        max-height: 220px;
-        overflow: auto;
+        color: var(--muted);
+        line-height: 1.4;
+        white-space: pre-line;
       }
     </style>
   </head>
@@ -327,7 +346,7 @@
             <input type="checkbox" id="ytPlaylist" checked />
             <span id="ytPlaylistLabel">Download all videos one by one</span>
           </label>
-          <p class="hint">Each file finishes downloading before the next one starts.</p>
+          <p class="hint" id="ytPlaylistHint">Each file is saved into your Videos folder, in a folder named after the playlist. The next video starts only after the current one finishes.</p>
         </div>
         <p class="hint" id="ytNotes"></p>
         <div class="row">
@@ -335,6 +354,10 @@
           <button class="primary" id="ytDownloadBtn" type="button" disabled title="Preview first">Download</button>
         </div>
         <p class="status" id="ytStatus"></p>
+        <div class="progress" id="ytProgress">
+          <div class="progress-track"><div class="progress-fill" id="ytProgressFill"></div></div>
+          <p class="progress-label" id="ytProgressLabel"></p>
+        </div>
         <div class="install" id="ytInstall" hidden>
           <strong id="ytInstallTitle">ffmpeg is required</strong>
           <p class="hint" id="ytInstallOs"></p>
@@ -386,6 +409,10 @@
       const ytPlaylistField = document.getElementById("ytPlaylistField");
       const ytPlaylist = document.getElementById("ytPlaylist");
       const ytPlaylistLabel = document.getElementById("ytPlaylistLabel");
+      const ytPlaylistHint = document.getElementById("ytPlaylistHint");
+      const ytProgress = document.getElementById("ytProgress");
+      const ytProgressFill = document.getElementById("ytProgressFill");
+      const ytProgressLabel = document.getElementById("ytProgressLabel");
       let ytOptions = null;
       let ytLastPreview = null;
       let igReady = false;
@@ -626,16 +653,40 @@
       function clearYtOutput() {
         ytStatus.textContent = "";
         ytStatus.classList.remove("error");
+        ytStatus.classList.remove("success");
         ytMeta.hidden = true;
         ytMeta.textContent = "";
         ytPreview.hidden = true;
         ytPreview.innerHTML = "";
+        hideYtProgress();
         if (ytOptions?.ffmpeg !== false) hideFfmpegInstall();
       }
 
-      function setYtStatus(message, isError = false) {
+      function hideYtProgress() {
+        ytProgress.classList.remove("visible");
+        ytProgressFill.style.width = "0%";
+        ytProgressLabel.textContent = "";
+      }
+
+      function showYtProgress(current, total, title, folder, phase, innerPercent) {
+        ytProgress.classList.add("visible");
+        const inner = typeof innerPercent === "number" ? innerPercent / 100 : 0;
+        const done = Math.max(0, current - 1) + inner;
+        const pct = total ? Math.min(100, Math.round((done / total) * 100)) : 0;
+        ytProgressFill.style.width = `${pct}%`;
+        ytProgressLabel.textContent = [
+          `Step ${current} of ${total}${phase ? " — " + phase : ""}`,
+          title,
+          folder ? `Folder: ${folder}` : "",
+        ]
+          .filter(Boolean)
+          .join("\n");
+      }
+
+      function setYtStatus(message, isError = false, isSuccess = false) {
         ytStatus.textContent = message;
         ytStatus.classList.toggle("error", isError);
+        ytStatus.classList.toggle("success", Boolean(isSuccess) && !isError);
       }
 
       function hideFfmpegInstall() {
@@ -726,8 +777,11 @@
           if (playlist) {
             ytMeta.textContent = `${data.title} · ${data.count} videos${data.uploader ? " · " + data.uploader : ""}`;
             ytPlaylist.checked = true;
-            ytPlaylistLabel.textContent = `Download all ${data.count} videos one by one`;
+            ytPlaylistLabel.textContent = `Save all ${data.count} videos one by one`;
             ytPlaylistField.hidden = false;
+            if (data.library_folder) {
+              ytPlaylistHint.textContent = `Saves into ${data.library_folder}. Each file finishes before the next starts.`;
+            }
             const shown = data.entries.slice(0, 25);
             const extra = data.count - shown.length;
             ytPreview.hidden = false;
@@ -737,7 +791,7 @@
                 .map((entry, index) => `<li>${index + 1}. ${entry.title}</li>`)
                 .join("")}${extra > 0 ? `<li>…and ${extra} more</li>` : ""}</ol></div>`;
             fillFilenameFromTitle(ytFilename, data.title, ytFormat() === "mp3" ? "mp3" : "mp4");
-            setYtStatus("Preview ready. Videos will download one after another. Uncheck to save only the first video, then Download.");
+            setYtStatus("Preview ready. Playlist videos save into your Videos/Movies folder. Uncheck to download only the first video in the browser.");
           } else {
             ytMeta.textContent = [data.title, data.uploader, duration].filter(Boolean).join(" · ");
             if (data.thumbnail) {
@@ -760,6 +814,37 @@
         const named = titleToFilename(title, ext) || `video-${pad}.${ext}`;
         const stem = named.replace(/\.(mp4|mp3)$/i, "");
         return `${pad} - ${stem}.${ext}`;
+      }
+
+      async function saveOneToLibrary(url, filename, format, playlistTitle, onProgress) {
+        const jobId = crypto.randomUUID ? crypto.randomUUID() : `job-${Date.now()}`;
+        const timer = setInterval(async () => {
+          try {
+            const response = await fetch(`/api/youtube/job/${encodeURIComponent(jobId)}`);
+            if (!response.ok) return;
+            const job = await response.json();
+            if (job && job.label && onProgress) onProgress(job);
+          } catch {}
+        }, 400);
+        try {
+          const response = await fetch("/api/youtube/save", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              url,
+              format,
+              video_quality: ytVideoQuality.value || "best",
+              audio_quality: ytAudioQuality.value || "192",
+              filename,
+              playlist_title: playlistTitle,
+              job_id: jobId,
+            }),
+          });
+          if (!response.ok) await readError(response);
+          return response.json();
+        } finally {
+          clearInterval(timer);
+        }
       }
 
       async function downloadOneVideo(url, filename, format) {
@@ -804,35 +889,53 @@
         try {
           if (playlist) {
             const entries = ytLastPreview.entries;
+            const folder = ytLastPreview.library_folder || ytLastPreview.title;
             let ok = 0;
             const failed = [];
+            hideYtProgress();
+            showYtProgress(1, entries.length, entries[0].title, folder, "Starting download");
             for (let i = 0; i < entries.length; i++) {
               const entry = entries[i];
-              setYtStatus(`Downloading ${i + 1} of ${entries.length}: ${entry.title}`);
+              showYtProgress(i + 1, entries.length, entry.title, folder, "Starting download");
+              setYtStatus(`Step ${i + 1} of ${entries.length}: starting — ${entry.title}`);
               try {
-                await downloadOneVideo(
+                const saved = await saveOneToLibrary(
                   entry.url,
                   playlistFileName(i + 1, entries.length, entry.title, ext),
-                  format
+                  format,
+                  ytLastPreview.title,
+                  (job) => {
+                    showYtProgress(
+                      i + 1,
+                      entries.length,
+                      entry.title,
+                      folder,
+                      job.label,
+                      job.percent
+                    );
+                    setYtStatus(`Step ${i + 1} of ${entries.length}: ${job.label} — ${entry.title}`);
+                  }
                 );
                 ok += 1;
+                showYtProgress(i + 1, entries.length, entry.title, folder, "Saved", 100);
+                setYtStatus(`Step ${i + 1} of ${entries.length}: saved ${saved.filename}`);
               } catch (err) {
                 if (err.install) {
                   showFfmpegInstall(err.install, err.message);
                   throw err;
                 }
                 failed.push(entry.title);
+                setYtStatus(`Step ${i + 1} of ${entries.length}: failed ${entry.title}`, true);
               }
             }
-            if (failed.length) {
-              setYtStatus(
-                `Finished ${ok} of ${entries.length}. Failed: ${failed.join(", ")}`,
-                true
-              );
-            } else {
-              setYtStatus(`Downloaded ${ok} of ${entries.length} videos.`);
-            }
+            showYtProgress(entries.length, entries.length, "Playlist complete", folder, "Done", 100);
+            const summary = failed.length
+              ? `Playlist finished with errors.\nSaved ${ok} of ${entries.length} to:\n${folder}\nFailed: ${failed.join(", ")}`
+              : `Playlist download complete.\nSaved ${ok} of ${entries.length} videos to:\n${folder}`;
+            setYtStatus(summary, failed.length > 0, failed.length === 0);
+            window.alert(summary);
           } else {
+            hideYtProgress();
             setYtStatus("Downloading with yt-dlp…");
             await downloadOneVideo(singleUrl, ytFilename.value.trim(), format);
             setYtStatus("Download started.");
