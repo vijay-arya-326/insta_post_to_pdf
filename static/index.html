@@ -60,8 +60,9 @@
         gap: 10px;
         flex-wrap: wrap;
       }
-      input[type="url"] {
-        flex: 1 1 280px;
+      input[type="url"],
+      input[type="text"] {
+        width: 100%;
         min-width: 0;
         background: #0d1016;
         color: var(--text);
@@ -70,9 +71,16 @@
         padding: 12px 14px;
         font-size: 1rem;
       }
-      input[type="url"]:focus {
+      input[type="url"]:focus,
+      input[type="text"]:focus {
         outline: 2px solid #6ea8ff;
         border-color: transparent;
+      }
+      .field {
+        margin-bottom: 14px;
+      }
+      .field:last-of-type {
+        margin-bottom: 0;
       }
       button {
         border: 0;
@@ -143,14 +151,25 @@
         Image posts only — no login.
       </p>
       <div class="card">
-        <label for="url">Instagram URL</label>
-        <div class="row">
+        <div class="field">
+          <label for="url">Instagram URL</label>
           <input
             id="url"
             type="url"
             placeholder="https://www.instagram.com/p/..."
             autocomplete="off"
           />
+        </div>
+        <div class="field">
+          <label for="filename">PDF filename</label>
+          <input
+            id="filename"
+            type="text"
+            placeholder="my-post.pdf"
+            autocomplete="off"
+          />
+        </div>
+        <div class="row">
           <button class="ghost" id="previewBtn" type="button">Preview</button>
           <button class="primary" id="pdfBtn" type="button">Download PDF</button>
         </div>
@@ -161,6 +180,7 @@
     </main>
     <script>
       const urlInput = document.getElementById("url");
+      const filenameInput = document.getElementById("filename");
       const previewBtn = document.getElementById("previewBtn");
       const pdfBtn = document.getElementById("pdfBtn");
       const statusEl = document.getElementById("status");
@@ -170,11 +190,30 @@
       function setBusy(busy) {
         previewBtn.disabled = busy;
         pdfBtn.disabled = busy;
+        urlInput.disabled = busy;
+        filenameInput.disabled = busy;
+      }
+
+      function clearOutput() {
+        statusEl.textContent = "";
+        statusEl.classList.remove("error");
+        metaEl.hidden = true;
+        metaEl.textContent = "";
+        gridEl.innerHTML = "";
       }
 
       function setStatus(message, isError = false) {
         statusEl.textContent = message;
         statusEl.classList.toggle("error", isError);
+      }
+
+      function chosenFilename(fallback) {
+        let name = filenameInput.value.trim();
+        if (!name) return fallback;
+        name = name.replace(/[\\/:*?"<>|]+/g, " ").replace(/\s+/g, " ").replace(/^[.\s]+|[.\s]+$/g, "");
+        if (!name) return fallback;
+        if (!name.toLowerCase().endsWith(".pdf")) name += ".pdf";
+        return name;
       }
 
       function payload() {
@@ -191,8 +230,7 @@
       }
 
       previewBtn.addEventListener("click", async () => {
-        gridEl.innerHTML = "";
-        metaEl.hidden = true;
+        clearOutput();
         if (!urlInput.value.trim()) {
           setStatus("Paste an Instagram post URL first.", true);
           return;
@@ -224,8 +262,13 @@
       });
 
       pdfBtn.addEventListener("click", async () => {
+        clearOutput();
         if (!urlInput.value.trim()) {
           setStatus("Paste an Instagram post URL first.", true);
+          return;
+        }
+        if (!filenameInput.value.trim()) {
+          setStatus("Enter a PDF filename first.", true);
           return;
         }
         setBusy(true);
@@ -241,11 +284,12 @@
           const disposition = response.headers.get("Content-Disposition") || "";
           const star = disposition.match(/filename\*=UTF-8''([^;]+)/);
           const match = disposition.match(/filename=\"([^\"]+)\"/);
-          const name = star
+          const fallback = star
             ? decodeURIComponent(star[1])
             : match
               ? match[1]
               : "instagram-post.pdf";
+          const name = chosenFilename(fallback);
           const href = URL.createObjectURL(blob);
           const a = document.createElement("a");
           a.href = href;

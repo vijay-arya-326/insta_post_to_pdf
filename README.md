@@ -48,6 +48,75 @@ Leave that terminal open. Open the app in your browser:
 
 `uv run` uses the `.venv` from `uv sync`, so you do not need to activate the environment yourself.
 
+## Start automatically when the OS starts
+
+Run `uv sync` once in this folder first. Autostart files live under `autostart/windows` and `autostart/macos`. They start the server **without** `--reload`.
+
+### Windows
+
+Files: `autostart/windows/`
+
+1. Double-click `install-autostart.bat`. That adds a Startup shortcut to `start-hidden.vbs`, which launches uvicorn with no console window.
+2. Sign in again and open [http://127.0.0.1:8585](http://127.0.0.1:8585).
+
+To stop autostart, run `uninstall-autostart.bat`. To stop a running copy, end the `uvicorn`/`python` process in Task Manager (there is no window to close). Use `start-insta-post-to-pdf.bat` only if you want a visible console for debugging.
+
+### macOS
+
+Files: `autostart/macos/`
+
+```bash
+chmod +x autostart/macos/install-autostart.sh autostart/macos/uninstall-autostart.sh autostart/macos/start-insta-post-to-pdf.sh
+./autostart/macos/install-autostart.sh
+```
+
+That writes a LaunchAgent from `com.local.insta-post-to-pdf.plist` and starts the helper script `start-insta-post-to-pdf.sh`.
+
+To stop and remove autostart:
+
+```bash
+./autostart/macos/uninstall-autostart.sh
+```
+
+### Ubuntu
+
+1. Create `~/.config/systemd/user/insta-post-to-pdf.service`:
+
+```ini
+[Unit]
+Description=Instagram post to PDF
+After=network.target
+
+[Service]
+WorkingDirectory=PROJECT_DIR
+ExecStart=UV_PATH run uvicorn app:app --host 127.0.0.1 --port 8585
+Restart=on-failure
+
+[Install]
+WantedBy=default.target
+```
+
+`UV_PATH` is usually `/home/YOUR_USER/.local/bin/uv`.
+
+2. Enable it for your user session:
+
+```bash
+systemctl --user daemon-reload
+systemctl --user enable --now insta-post-to-pdf.service
+```
+
+It starts when you log in. To also start it when you are not logged in:
+
+```bash
+loginctl enable-linger "$USER"
+```
+
+To stop and disable:
+
+```bash
+systemctl --user disable --now insta-post-to-pdf.service
+```
+
 ## How to use
 
 1. In Instagram, open a **public photo post** and copy the link (Share → Copy link).  
