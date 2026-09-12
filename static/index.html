@@ -76,6 +76,7 @@
         display: flex;
         gap: 10px;
         flex-wrap: wrap;
+        margin-top: 20px;
       }
       input[type="url"],
       input[type="text"],
@@ -218,6 +219,7 @@
       }
       .yt-preview {
         display: flex;
+        flex-wrap: wrap;
         gap: 14px;
         margin-top: 16px;
         align-items: flex-start;
@@ -227,6 +229,27 @@
         max-width: 40%;
         border-radius: 10px;
         border: 1px solid var(--line);
+      }
+      .yt-preview-body {
+        flex: 1;
+        min-width: 0;
+      }
+      .playlist {
+        flex: 1 1 100%;
+        max-height: 280px;
+        overflow-y: auto;
+        padding: 12px 14px;
+        background: #0d1016;
+        border: 1px solid var(--line);
+        border-radius: 10px;
+      }
+      .playlist p {
+        margin: 0 0 12px;
+        line-height: 1.5;
+        font-size: 0.92rem;
+      }
+      .playlist p:last-child {
+        margin-bottom: 0;
       }
       .progress {
         margin-top: 16px;
@@ -517,6 +540,14 @@
         URL.revokeObjectURL(href);
       }
 
+      function escapeHtml(text) {
+        return String(text)
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;");
+      }
+
       function filenameFromDisposition(disposition, fallback) {
         const star = disposition.match(/filename\*=UTF-8''([^;]+)/);
         const match = disposition.match(/filename=\"([^\"]+)\"/);
@@ -782,14 +813,14 @@
             if (data.library_folder) {
               ytPlaylistHint.textContent = `Saves into ${data.library_folder}. Each file finishes before the next starts.`;
             }
-            const shown = data.entries.slice(0, 25);
-            const extra = data.count - shown.length;
+            const items = data.entries
+              .map((entry, index) => `<p>${index + 1}. ${escapeHtml(entry.title)}</p>`)
+              .join("");
             ytPreview.hidden = false;
             ytPreview.innerHTML =
               (data.thumbnail ? `<img alt="" src="${data.thumbnail}" />` : "") +
-              `<div><div>${data.title}</div><ol class="playlist">${shown
-                .map((entry, index) => `<li>${index + 1}. ${entry.title}</li>`)
-                .join("")}${extra > 0 ? `<li>…and ${extra} more</li>` : ""}</ol></div>`;
+              `<div class="yt-preview-body">${escapeHtml(data.title)}</div>` +
+              `<div class="playlist">${items}</div>`;
             fillFilenameFromTitle(ytFilename, data.title, ytFormat() === "mp3" ? "mp3" : "mp4");
             setYtStatus("Preview ready. Playlist videos save into your Videos/Movies folder. Uncheck to download only the first video in the browser.");
           } else {
@@ -933,7 +964,13 @@
               ? `Playlist finished with errors.\nSaved ${ok} of ${entries.length} to:\n${folder}\nFailed: ${failed.join(", ")}`
               : `Playlist download complete.\nSaved ${ok} of ${entries.length} videos to:\n${folder}`;
             setYtStatus(summary, failed.length > 0, failed.length === 0);
-            window.alert(summary);
+            if (failed.length) {
+              window.alert(summary);
+            } else {
+              await new Promise((resolve) => setTimeout(resolve, 2000));
+              window.alert(summary);
+              window.location.reload();
+            }
           } else {
             hideYtProgress();
             setYtStatus("Downloading with yt-dlp…");
