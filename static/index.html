@@ -365,6 +365,11 @@
             <p class="hint" id="audioQualityHint">Highest common MP3 bitrate.</p>
           </div>
         </div>
+        <div class="field">
+          <label for="ytCookies">YouTube cookies</label>
+          <select id="ytCookies"></select>
+          <p class="hint" id="ytCookiesHint">YouTube may block downloads unless you are signed in. Pick the browser where you are logged in to YouTube.</p>
+        </div>
         <div class="field" id="ytPlaylistField" hidden>
           <label class="choice">
             <input type="checkbox" id="ytPlaylist" checked />
@@ -414,6 +419,7 @@
       const ytFilename = document.getElementById("ytFilename");
       const ytVideoQuality = document.getElementById("ytVideoQuality");
       const ytAudioQuality = document.getElementById("ytAudioQuality");
+      const ytCookies = document.getElementById("ytCookies");
       const ytPreviewBtn = document.getElementById("ytPreviewBtn");
       const ytDownloadBtn = document.getElementById("ytDownloadBtn");
       const ytStatus = document.getElementById("ytStatus");
@@ -650,6 +656,14 @@
         return "mp4";
       }
 
+      function ytCookiesBrowser() {
+        return ytCookies.value || "chrome";
+      }
+
+      function ytCookieFields() {
+        return { cookies_from_browser: ytCookiesBrowser() };
+      }
+
       function fillSelect(select, items) {
         select.innerHTML = "";
         for (const item of items) {
@@ -686,6 +700,7 @@
         ytFilename.disabled = busy;
         ytVideoQuality.disabled = busy;
         ytAudioQuality.disabled = busy;
+        ytCookies.disabled = busy;
         ytPlaylist.disabled = busy;
         for (const input of document.querySelectorAll('input[name="ytFormat"]')) input.disabled = busy;
       }
@@ -764,6 +779,17 @@
           ytOptions = await response.json();
           fillSelect(ytVideoQuality, ytOptions.video_quality);
           fillSelect(ytAudioQuality, ytOptions.audio_quality);
+          fillSelect(ytCookies, ytOptions.cookie_browsers || []);
+          try {
+            const saved = localStorage.getItem("ytCookiesBrowser");
+            const allowed = [...ytCookies.options].map((option) => option.value);
+            ytCookies.value =
+              saved && allowed.includes(saved)
+                ? saved
+                : ytOptions.cookie_browser_default || "chrome";
+          } catch {
+            ytCookies.value = ytOptions.cookie_browser_default || "chrome";
+          }
           ytNotes.textContent = [
             ...(ytOptions.notes || []),
             ytOptions.ffmpeg ? "ffmpeg is installed." : "ffmpeg was not found on PATH.",
@@ -787,6 +813,11 @@
       }
       ytVideoQuality.addEventListener("change", syncYoutubeFields);
       ytAudioQuality.addEventListener("change", syncYoutubeFields);
+      ytCookies.addEventListener("change", () => {
+        try {
+          localStorage.setItem("ytCookiesBrowser", ytCookies.value);
+        } catch {}
+      });
 
       ytPreviewBtn.addEventListener("click", async () => {
         clearYtOutput();
@@ -802,7 +833,7 @@
           const response = await fetch("/api/youtube/preview", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ url: ytUrl.value.trim() }),
+            body: JSON.stringify({ url: ytUrl.value.trim(), ...ytCookieFields() }),
           });
           if (!response.ok) await readError(response);
           const data = await response.json();
@@ -878,6 +909,7 @@
               filename,
               playlist_title: playlistTitle,
               job_id: jobId,
+              ...ytCookieFields(),
             }),
           });
           if (!response.ok) await readError(response);
@@ -897,6 +929,7 @@
             video_quality: ytVideoQuality.value || "best",
             audio_quality: ytAudioQuality.value || "192",
             filename,
+            ...ytCookieFields(),
           }),
         });
         if (!response.ok) await readError(response);

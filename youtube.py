@@ -36,6 +36,15 @@ FORMATS = (
 )
 VIDEO_KINDS = {"mp4", "webm"}
 AUDIO_KINDS = {"mp3"}
+COOKIE_BROWSERS = (
+    {"id": "chrome", "label": "Chrome"},
+    {"id": "safari", "label": "Safari"},
+    {"id": "firefox", "label": "Firefox"},
+    {"id": "edge", "label": "Edge"},
+    {"id": "brave", "label": "Brave"},
+    {"id": "chromium", "label": "Chromium"},
+    {"id": "none", "label": "None"},
+)
 
 
 class YoutubeError(Exception):
@@ -155,6 +164,62 @@ def ffmpeg_missing_error() -> YoutubeError:
     )
 
 
+def cookies_help(browser: str = "chrome") -> dict[str, str | list[str]]:
+    name = (browser or "chrome").strip() or "chrome"
+    label = name.title()
+    return {
+        "os": platform.system(),
+        "command": f"Sign in to YouTube in {label}, then retry Preview / Download.",
+        "steps": [
+            f"Open {label} and sign in at youtube.com (use the same profile you download with).",
+            "In this app, set YouTube cookies to that browser.",
+            "macOS may ask for Keychain access — choose Allow.",
+            "If cookie copy fails, fully quit that browser and try again (common with Firefox).",
+            "Preview or Download again.",
+        ],
+    }
+
+
+def cookies_needed_error(browser: str = "") -> YoutubeError:
+    chosen = browser or "chrome"
+    return YoutubeError(
+        "YouTube asked to confirm you are not a bot. Sign in to YouTube in your browser, pick that browser under YouTube cookies, and try again.",
+        install=cookies_help(chosen),
+    )
+
+
+def normalize_cookie_browser(name: str) -> str:
+    text = (name or "").strip().lower()
+    if text in {"", "none", "off"}:
+        return ""
+    allowed = {item["id"] for item in COOKIE_BROWSERS if item["id"] != "none"}
+    if text not in allowed:
+        raise YoutubeError("Unknown browser for YouTube cookies.")
+    return text
+
+
+def _cookie_opts(browser: str) -> dict:
+    if not browser:
+        return {}
+    return {"cookiesfrombrowser": (browser,)}
+
+
+def _needs_youtube_cookies(message: str) -> bool:
+    return any(
+        needle in message
+        for needle in (
+            "not a bot",
+            "cookies-from-browser",
+            "cookies for the authentication",
+            "--cookies",
+            "could not copy",
+            "failed to decrypt",
+            "failed to load cookies",
+            "unable to load cookies",
+        )
+    )
+
+
 @dataclass
 class YoutubeEntry:
     id: str
@@ -185,9 +250,12 @@ def available_options() -> dict:
             "Playlists save into your Videos folder (Movies on macOS), in a folder named after the playlist. Each video finishes before the next starts.",
             "MP4/WebM merge and MP3 conversion need ffmpeg on PATH.",
             "Best MP4 prefers mp4/m4a streams. Best WebM prefers webm/opus streams.",
+            "YouTube may ask for a sign-in. Use YouTube cookies from the browser where you are logged in.",
         ],
         "ffmpeg": shutil.which("ffmpeg") is not None,
         "ffmpeg_install": ffmpeg_install_guide(),
+        "cookie_browsers": list(COOKIE_BROWSERS),
+        "cookie_browser_default": "chrome",
         "library_root": str(user_videos_library()),
     }
 
@@ -223,23 +291,28 @@ def _kind_ext(kind: str) -> str:
 
 
 def _format_selector(kind: str, video_quality: str) -> str:
+    """Build a yt-dlp format selector that always includes audio.
+
+    Primary: ``bestvideo+bestaudio`` — strictly matches video-only + audio-only
+    streams so yt-dlp always merges two separate tracks via ffmpeg.
+    Fallback: ``best`` (NOT ``best*``) — ``best`` = combined video+audio;
+    ``best*`` = "best video" which can be video-only (no audio).
+    """
     if kind == "mp3":
         return "bestaudio/best"
     height = None if video_quality == "best" else video_quality
-    if kind == "webm":
-        vext, aext = "webm", "webm"
-    else:
-        vext, aext = "mp4", "m4a"
     if height:
         return (
-            f"bestvideo[height<={height}][ext={vext}]+bestaudio[ext={aext}]/"
+            # Strictly video-only + audio-only → always two-track merge
             f"bestvideo[height<={height}]+bestaudio/"
-            f"best[height<={height}][ext={vext}]/best[height<={height}]"
+            # Wider fallback (any ext) still requiring two tracks
+            f"bestvideo*[height<={height}]+bestaudio*/"
+            # Combined format within height cap (has both video+audio)
+            f"best[height<={height}]/"
+            # Absolute fallback — always has both video+audio
+            "best"
         )
-    return (
-        f"bestvideo[ext={vext}]+bestaudio[ext={aext}]/"
-        f"bestvideo+bestaudio/best[ext={vext}]/best"
-    )
+    return "bestvideo+bestaudio/bestvideo*+bestaudio*/best"
 
 
 def _base_opts() -> dict:
@@ -249,16 +322,31 @@ def _base_opts() -> dict:
         "noprogress": True,
         "noplaylist": True,
         "overwrites": True,
+        # Enable the EJS JS-challenge solver (runs via deno).
+        # Without this, YouTube's signature/n-challenge decryption fails and
+        # yt-dlp only returns storyboard thumbnails — every format selector
+        # then raises "Requested format is not available".
+        # The solver script is downloaded from GitHub on first use and cached.
+        "allow_unplayable_formats": False,
+        "extractor_args": {"youtube": {"player_client": ["web_creator", "tv"]}},
+        "remote_components": ["ejs:github"],
     }
 
 
-def _extract_sync(url: str, *, allow_playlist: bool = False, extract_flat: bool = False) -> dict:
+def _extract_sync(
+    url: str,
+    *,
+    allow_playlist: bool = False,
+    extract_flat: bool = False,
+    cookies_browser: str = "",
+) -> dict:
     opts = {
         **_base_opts(),
         "skip_download": True,
         "ignore_no_formats_error": True,
         "noplaylist": not allow_playlist,
         "ignoreerrors": allow_playlist,
+        **_cookie_opts(cookies_browser),
     }
     if extract_flat:
         opts["extract_flat"] = True
@@ -273,6 +361,7 @@ def _download_sync(
     video_quality: str,
     audio_quality: str,
     job_id: str = "",
+    cookies_browser: str = "",
 ) -> tuple[dict, Path]:
     if kind in VIDEO_KINDS | AUDIO_KINDS and not shutil.which("ffmpeg"):
         raise ffmpeg_missing_error()
@@ -286,6 +375,7 @@ def _download_sync(
         "restrictfilenames": True,
         "noprogress": not bool(job_id),
         "no_color": True,
+        **_cookie_opts(cookies_browser),
     }
     if job_id:
         set_job_progress(job_id, phase="starting", label="Starting download")
@@ -396,31 +486,46 @@ def _info_from_raw(info: dict) -> YoutubeInfo:
     )
 
 
-async def preview_video(url: str) -> YoutubeInfo:
+async def preview_video(url: str, cookies_browser: str = "") -> YoutubeInfo:
     url = assert_youtube_url(url)
+    cookies_browser = normalize_cookie_browser(cookies_browser)
     playlist_id = playlist_id_from_url(url)
     extract_url = playlist_page_url(playlist_id) if playlist_id else url
     try:
         info = await asyncio.to_thread(
-            _extract_sync, extract_url, allow_playlist=True, extract_flat=True
+            _extract_sync,
+            extract_url,
+            allow_playlist=True,
+            extract_flat=True,
+            cookies_browser=cookies_browser,
         )
         if playlist_id and (not info or info.get("_type") != "playlist"):
             info = await asyncio.to_thread(
-                _extract_sync, url, allow_playlist=True, extract_flat=True
+                _extract_sync,
+                url,
+                allow_playlist=True,
+                extract_flat=True,
+                cookies_browser=cookies_browser,
             )
     except (DownloadError, ExtractorError) as exc:
         if extract_url != url:
             try:
                 info = await asyncio.to_thread(
-                    _extract_sync, url, allow_playlist=True, extract_flat=True
+                    _extract_sync,
+                    url,
+                    allow_playlist=True,
+                    extract_flat=True,
+                    cookies_browser=cookies_browser,
                 )
             except Exception:
-                raise _from_ydl_error(exc) from exc
+                raise _from_ydl_error(exc, cookies_browser) from exc
         else:
-            raise _from_ydl_error(exc) from exc
+            raise _from_ydl_error(exc, cookies_browser) from exc
     except YoutubeError:
         raise
     except Exception as exc:
+        if _needs_youtube_cookies(str(exc).lower()):
+            raise cookies_needed_error(cookies_browser) from exc
         raise YoutubeError("Could not load that YouTube video.") from exc
     if not info:
         raise YoutubeError("Could not load that YouTube video.")
@@ -435,8 +540,10 @@ async def download_video(
     audio_quality: str,
     output_name: str = "",
     job_id: str = "",
+    cookies_browser: str = "",
 ) -> tuple[YoutubeInfo, Path]:
     url = assert_youtube_url(url)
+    cookies_browser = normalize_cookie_browser(cookies_browser)
     if kind not in VIDEO_KINDS | AUDIO_KINDS:
         raise YoutubeError("Format must be mp4, webm, or mp3.")
     allowed_video = {item["id"] for item in VIDEO_QUALITIES}
@@ -447,16 +554,25 @@ async def download_video(
         raise YoutubeError("Unknown audio quality.")
     try:
         info, path = await asyncio.to_thread(
-            _download_sync, url, dest_dir, kind, video_quality, audio_quality, job_id
+            _download_sync,
+            url,
+            dest_dir,
+            kind,
+            video_quality,
+            audio_quality,
+            job_id,
+            cookies_browser,
         )
         meta = _info_from_raw(info)
     except YoutubeError:
         raise
     except (DownloadError, ExtractorError) as exc:
-        raise _from_ydl_error(exc) from exc
+        raise _from_ydl_error(exc, cookies_browser) from exc
     except Exception as exc:
         if "ffmpeg" in str(exc).lower():
             raise ffmpeg_missing_error() from exc
+        if _needs_youtube_cookies(str(exc).lower()):
+            raise cookies_needed_error(cookies_browser) from exc
         raise YoutubeError(f"Could not download that video ({exc}).") from exc
     ext = _kind_ext(kind)
     final_name = sanitize_download_name(output_name or meta.title, ext)
@@ -470,14 +586,21 @@ async def download_video(
     return meta, path
 
 
-def _from_ydl_error(exc: BaseException) -> YoutubeError:
+def _from_ydl_error(exc: BaseException, cookies_browser: str = "") -> YoutubeError:
     message = str(exc).lower()
     if "ffmpeg" in message:
         return ffmpeg_missing_error()
-    if "sign in" in message or "age" in message or "confirm your age" in message:
+    if _needs_youtube_cookies(message):
+        return cookies_needed_error(cookies_browser)
+    if "age" in message or "confirm your age" in message:
         return YoutubeError("That video is age-restricted or needs a sign-in.")
     if "private" in message:
         return YoutubeError("That video is private.")
+    if "requested format is not available" in message or "no video formats found" in message:
+        return YoutubeError(
+            "No downloadable format was found for that video. "
+            "It may be a live stream, a members-only video, or a region-restricted upload."
+        )
     return YoutubeError("Could not download that YouTube video.")
 
 
