@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Instagram post to PDF</title>
+    <title>Insta Post to PDF</title>
     <style>
       :root {
         --bg: #0f1115;
@@ -39,8 +39,25 @@
       }
       .lede {
         color: var(--muted);
-        margin: 0 0 28px;
+        margin: 0 0 20px;
         line-height: 1.5;
+      }
+      .tabs {
+        display: flex;
+        gap: 8px;
+        margin: 0 0 16px;
+      }
+      .tabs button {
+        background: transparent;
+        color: var(--muted);
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        padding: 10px 16px;
+      }
+      .tabs button[aria-selected="true"] {
+        background: var(--accent);
+        color: var(--accent-text);
+        border-color: transparent;
       }
       .card {
         background: color-mix(in srgb, var(--panel) 88%, transparent);
@@ -61,7 +78,8 @@
         flex-wrap: wrap;
       }
       input[type="url"],
-      input[type="text"] {
+      input[type="text"],
+      select {
         width: 100%;
         min-width: 0;
         background: #0d1016;
@@ -72,15 +90,44 @@
         font-size: 1rem;
       }
       input[type="url"]:focus,
-      input[type="text"]:focus {
+      input[type="text"]:focus,
+      select:focus {
         outline: 2px solid #6ea8ff;
         border-color: transparent;
       }
       .field {
         margin-bottom: 14px;
       }
-      .field:last-of-type {
-        margin-bottom: 0;
+      .options {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 14px;
+      }
+      @media (max-width: 640px) {
+        .options {
+          grid-template-columns: 1fr;
+        }
+      }
+      .choice {
+        display: flex;
+        gap: 16px;
+        flex-wrap: wrap;
+        color: var(--text);
+        font-size: 0.95rem;
+      }
+      .choice label {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin: 0;
+        color: var(--text);
+        cursor: pointer;
+      }
+      .hint {
+        margin: 6px 0 0;
+        font-size: 0.8rem;
+        color: var(--muted);
+        line-height: 1.4;
       }
       button {
         border: 0;
@@ -111,6 +158,34 @@
       .status.error {
         color: var(--danger);
       }
+      .install {
+        margin-top: 16px;
+        padding: 14px 16px;
+        border: 1px solid color-mix(in srgb, var(--danger) 45%, var(--line));
+        border-radius: 12px;
+        background: #1a1214;
+      }
+      .install strong {
+        display: block;
+        color: var(--danger);
+        margin-bottom: 6px;
+      }
+      .install ol {
+        margin: 8px 0;
+        padding-left: 1.3em;
+        color: var(--text);
+        line-height: 1.5;
+      }
+      .install pre {
+        margin: 0;
+        padding: 10px 12px;
+        background: #0d1016;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        overflow-x: auto;
+        font-size: 0.85rem;
+        color: var(--text);
+      }
       .meta {
         margin-top: 18px;
         color: var(--muted);
@@ -140,17 +215,38 @@
         font-size: 0.8rem;
         color: var(--muted);
       }
+      .yt-preview {
+        display: flex;
+        gap: 14px;
+        margin-top: 16px;
+        align-items: flex-start;
+      }
+      .yt-preview img {
+        width: 180px;
+        max-width: 40%;
+        border-radius: 10px;
+        border: 1px solid var(--line);
+      }
     </style>
   </head>
   <body>
     <main>
-      <h1>Instagram post to PDF</h1>
-      <p class="lede">
+      <h1>Insta Post to PDF</h1>
+      <p class="lede" id="lede">
         Paste a public Instagram photo post. Every carousel slide
         (<code>?img_index=1</code> through the last slide) becomes a page in a PDF.
         Image posts only — no login.
       </p>
-      <div class="card">
+      <div class="tabs" role="tablist">
+        <button type="button" role="tab" id="tab-instagram" aria-controls="panel-instagram" aria-selected="true">
+          Insta Post to PDF
+        </button>
+        <button type="button" role="tab" id="tab-youtube" aria-controls="panel-youtube" aria-selected="false">
+          Youtube Videos
+        </button>
+      </div>
+
+      <div class="card" id="panel-instagram" role="tabpanel" aria-labelledby="tab-instagram">
         <div class="field">
           <label for="url">Instagram URL</label>
           <input
@@ -165,7 +261,7 @@
           <input
             id="filename"
             type="text"
-            placeholder="my-post.pdf"
+            placeholder="Filled from title — you can edit"
             autocomplete="off"
           />
         </div>
@@ -177,8 +273,73 @@
         <div class="meta" id="meta" hidden></div>
         <div class="grid" id="grid"></div>
       </div>
+
+      <div class="card" id="panel-youtube" role="tabpanel" aria-labelledby="tab-youtube" hidden>
+        <div class="field">
+          <label for="ytUrl">YouTube URL</label>
+          <input
+            id="ytUrl"
+            type="url"
+            placeholder="https://www.youtube.com/watch?v=..."
+            autocomplete="off"
+          />
+        </div>
+        <div class="field">
+          <label for="ytFilename">Filename</label>
+          <input
+            id="ytFilename"
+            type="text"
+            placeholder="Filled from title — you can edit"
+            autocomplete="off"
+          />
+        </div>
+        <div class="options">
+          <div class="field">
+            <label>Format</label>
+            <div class="choice">
+              <label><input type="radio" name="ytFormat" value="mp4" checked /> MP4 video</label>
+              <label><input type="radio" name="ytFormat" value="mp3" /> MP3 audio</label>
+            </div>
+            <p class="hint" id="formatHint">Best video + audio merged into MP4 (needs ffmpeg).</p>
+          </div>
+          <div class="field" id="videoQualityField">
+            <label for="ytVideoQuality">Video quality</label>
+            <select id="ytVideoQuality"></select>
+            <p class="hint" id="videoQualityHint">Highest video and audio yt-dlp can merge to MP4.</p>
+          </div>
+          <div class="field" id="audioQualityField" hidden>
+            <label for="ytAudioQuality">Audio bitrate</label>
+            <select id="ytAudioQuality"></select>
+            <p class="hint" id="audioQualityHint">Highest common MP3 bitrate.</p>
+          </div>
+        </div>
+        <p class="hint" id="ytNotes"></p>
+        <div class="row">
+          <button class="ghost" id="ytPreviewBtn" type="button">Preview</button>
+          <button class="primary" id="ytDownloadBtn" type="button">Download</button>
+        </div>
+        <p class="status" id="ytStatus"></p>
+        <div class="install" id="ytInstall" hidden>
+          <strong id="ytInstallTitle">ffmpeg is required</strong>
+          <p class="hint" id="ytInstallOs"></p>
+          <ol id="ytInstallSteps"></ol>
+          <pre id="ytInstallCmd"></pre>
+        </div>
+        <div class="meta" id="ytMeta" hidden></div>
+        <div class="yt-preview" id="ytPreview" hidden></div>
+      </div>
     </main>
     <script>
+      const INSTAGRAM_LEDE =
+        "Paste a public Instagram photo post. Every carousel slide (?img_index=1 through the last slide) becomes a page in a PDF. Image posts only — no login.";
+      const YOUTUBE_LEDE =
+        "Paste a YouTube link and download the best MP4 (video) or MP3 (audio) with yt-dlp. ffmpeg is required to merge video and to convert audio.";
+
+      const tabInstagram = document.getElementById("tab-instagram");
+      const tabYoutube = document.getElementById("tab-youtube");
+      const panelInstagram = document.getElementById("panel-instagram");
+      const panelYoutube = document.getElementById("panel-youtube");
+      const lede = document.getElementById("lede");
       const urlInput = document.getElementById("url");
       const filenameInput = document.getElementById("filename");
       const previewBtn = document.getElementById("previewBtn");
@@ -186,6 +347,40 @@
       const statusEl = document.getElementById("status");
       const metaEl = document.getElementById("meta");
       const gridEl = document.getElementById("grid");
+      const ytUrl = document.getElementById("ytUrl");
+      const ytFilename = document.getElementById("ytFilename");
+      const ytVideoQuality = document.getElementById("ytVideoQuality");
+      const ytAudioQuality = document.getElementById("ytAudioQuality");
+      const ytPreviewBtn = document.getElementById("ytPreviewBtn");
+      const ytDownloadBtn = document.getElementById("ytDownloadBtn");
+      const ytStatus = document.getElementById("ytStatus");
+      const ytMeta = document.getElementById("ytMeta");
+      const ytPreview = document.getElementById("ytPreview");
+      const videoQualityField = document.getElementById("videoQualityField");
+      const audioQualityField = document.getElementById("audioQualityField");
+      const formatHint = document.getElementById("formatHint");
+      const videoQualityHint = document.getElementById("videoQualityHint");
+      const audioQualityHint = document.getElementById("audioQualityHint");
+      const ytNotes = document.getElementById("ytNotes");
+      const ytInstall = document.getElementById("ytInstall");
+      const ytInstallTitle = document.getElementById("ytInstallTitle");
+      const ytInstallOs = document.getElementById("ytInstallOs");
+      const ytInstallSteps = document.getElementById("ytInstallSteps");
+      const ytInstallCmd = document.getElementById("ytInstallCmd");
+      let ytOptions = null;
+
+      function selectTab(name) {
+        const instagram = name === "instagram";
+        tabInstagram.setAttribute("aria-selected", String(instagram));
+        tabYoutube.setAttribute("aria-selected", String(!instagram));
+        panelInstagram.hidden = !instagram;
+        panelYoutube.hidden = instagram;
+        lede.textContent = instagram ? INSTAGRAM_LEDE : YOUTUBE_LEDE;
+        document.title = instagram ? "Insta Post to PDF" : "Youtube Videos";
+      }
+
+      tabInstagram.addEventListener("click", () => selectTab("instagram"));
+      tabYoutube.addEventListener("click", () => selectTab("youtube"));
 
       function setBusy(busy) {
         previewBtn.disabled = busy;
@@ -207,6 +402,32 @@
         statusEl.classList.toggle("error", isError);
       }
 
+      function titleToFilename(title, ext) {
+        let stem = (title || "").trim().split(/\r?\n/)[0].trim();
+        if (["", "na", "n/a", "unknown"].includes(stem.toLowerCase())) return "";
+        stem = stem
+          .replace(/[\\/:*?"<>|]+/g, " ")
+          .replace(/\s+/g, " ")
+          .replace(/^[.\s]+|[.\s]+$/g, "");
+        if (!stem) return "";
+        const suffix = "." + ext;
+        if (stem.toLowerCase().endsWith(suffix)) return stem;
+        return stem + suffix;
+      }
+
+      function fillFilenameFromTitle(input, title, ext) {
+        const name = titleToFilename(title, ext);
+        if (!name) return;
+        input.value = name;
+      }
+
+      function swapFilenameExt(input, ext) {
+        const name = input.value.trim();
+        if (!name) return;
+        const stem = name.replace(/\.(mp4|mp3|pdf)$/i, "");
+        input.value = stem + "." + ext;
+      }
+
       function chosenFilename(fallback) {
         let name = filenameInput.value.trim();
         if (!name) return fallback;
@@ -222,11 +443,36 @@
 
       async function readError(response) {
         let detail = "Something went wrong.";
+        let install = null;
         try {
           const data = await response.json();
-          detail = data.detail || detail;
+          if (data.detail && typeof data.detail === "object") {
+            detail = data.detail.message || detail;
+            install = data.detail.install || null;
+          } else {
+            detail = data.detail || detail;
+          }
         } catch {}
-        throw new Error(detail);
+        const err = new Error(detail);
+        err.install = install;
+        throw err;
+      }
+
+      function triggerDownload(blob, name) {
+        const href = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = href;
+        a.download = name;
+        a.click();
+        URL.revokeObjectURL(href);
+      }
+
+      function filenameFromDisposition(disposition, fallback) {
+        const star = disposition.match(/filename\*=UTF-8''([^;]+)/);
+        const match = disposition.match(/filename=\"([^\"]+)\"/);
+        if (star) return decodeURIComponent(star[1]);
+        if (match) return match[1];
+        return fallback;
       }
 
       previewBtn.addEventListener("click", async () => {
@@ -247,13 +493,14 @@
           const data = await response.json();
           metaEl.hidden = false;
           metaEl.textContent = `${data.count} photo${data.count === 1 ? "" : "s"} from ${data.shortcode} (img_index 1–${data.count}).`;
+          fillFilenameFromTitle(filenameInput, data.title || data.caption || data.shortcode, "pdf");
           for (const slide of data.slides) {
             const card = document.createElement("div");
             card.className = "slide";
             card.innerHTML = `<img alt="Slide ${slide.index}" src="${slide.preview}" /><span>Slide ${slide.index} · ${slide.width}×${slide.height}</span>`;
             gridEl.appendChild(card);
           }
-          setStatus("Ready to download.");
+          setStatus("Ready to download. You can edit the filename.");
         } catch (err) {
           setStatus(err.message, true);
         } finally {
@@ -281,21 +528,11 @@
           });
           if (!response.ok) await readError(response);
           const blob = await response.blob();
-          const disposition = response.headers.get("Content-Disposition") || "";
-          const star = disposition.match(/filename\*=UTF-8''([^;]+)/);
-          const match = disposition.match(/filename=\"([^\"]+)\"/);
-          const fallback = star
-            ? decodeURIComponent(star[1])
-            : match
-              ? match[1]
-              : "instagram-post.pdf";
-          const name = chosenFilename(fallback);
-          const href = URL.createObjectURL(blob);
-          const a = document.createElement("a");
-          a.href = href;
-          a.download = name;
-          a.click();
-          URL.revokeObjectURL(href);
+          const fallback = filenameFromDisposition(
+            response.headers.get("Content-Disposition") || "",
+            "instagram-post.pdf"
+          );
+          triggerDownload(blob, chosenFilename(fallback));
           setStatus("PDF downloaded.");
         } catch (err) {
           setStatus(err.message, true);
@@ -307,6 +544,201 @@
       urlInput.addEventListener("keydown", (event) => {
         if (event.key === "Enter") previewBtn.click();
       });
+
+      function ytFormat() {
+        return document.querySelector('input[name="ytFormat"]:checked').value;
+      }
+
+      function fillSelect(select, items) {
+        select.innerHTML = "";
+        for (const item of items) {
+          const option = document.createElement("option");
+          option.value = item.id;
+          option.textContent = item.label;
+          select.appendChild(option);
+        }
+      }
+
+      function hintFor(items, id, fallback) {
+        const match = (items || []).find((item) => item.id === id);
+        return match ? match.help : fallback;
+      }
+
+      function syncYoutubeFields() {
+        const format = ytFormat();
+        const mp4 = format === "mp4";
+        videoQualityField.hidden = !mp4;
+        audioQualityField.hidden = mp4;
+        formatHint.textContent = hintFor(ytOptions?.formats, format, "");
+        videoQualityHint.textContent = hintFor(ytOptions?.video_quality, ytVideoQuality.value, "");
+        audioQualityHint.textContent = hintFor(ytOptions?.audio_quality, ytAudioQuality.value, "");
+        ytFilename.placeholder = mp4 ? "my-video.mp4" : "my-audio.mp3";
+        swapFilenameExt(ytFilename, mp4 ? "mp4" : "mp3");
+      }
+
+      function setYtBusy(busy) {
+        ytPreviewBtn.disabled = busy;
+        ytDownloadBtn.disabled = busy;
+        ytUrl.disabled = busy;
+        ytFilename.disabled = busy;
+        ytVideoQuality.disabled = busy;
+        ytAudioQuality.disabled = busy;
+        for (const input of document.querySelectorAll('input[name="ytFormat"]')) input.disabled = busy;
+      }
+
+      function clearYtOutput() {
+        ytStatus.textContent = "";
+        ytStatus.classList.remove("error");
+        ytMeta.hidden = true;
+        ytMeta.textContent = "";
+        ytPreview.hidden = true;
+        ytPreview.innerHTML = "";
+        if (ytOptions?.ffmpeg !== false) hideFfmpegInstall();
+      }
+
+      function setYtStatus(message, isError = false) {
+        ytStatus.textContent = message;
+        ytStatus.classList.toggle("error", isError);
+      }
+
+      function hideFfmpegInstall() {
+        ytInstall.hidden = true;
+        ytInstallSteps.innerHTML = "";
+        ytInstallCmd.textContent = "";
+        ytInstallOs.textContent = "";
+      }
+
+      function showFfmpegInstall(install, message) {
+        if (!install) return;
+        ytInstall.hidden = false;
+        ytInstallTitle.textContent = message || "ffmpeg is required.";
+        ytInstallOs.textContent = `Detected OS: ${install.os}`;
+        ytInstallSteps.innerHTML = "";
+        for (const step of install.steps || []) {
+          const item = document.createElement("li");
+          item.textContent = step;
+          ytInstallSteps.appendChild(item);
+        }
+        ytInstallCmd.textContent = install.command || "";
+      }
+
+      function formatDuration(seconds) {
+        if (!seconds && seconds !== 0) return "";
+        const m = Math.floor(seconds / 60);
+        const s = seconds % 60;
+        return `${m}:${String(s).padStart(2, "0")}`;
+      }
+
+      async function loadYtOptions() {
+        try {
+          const response = await fetch("/api/youtube/options");
+          if (!response.ok) await readError(response);
+          ytOptions = await response.json();
+          fillSelect(ytVideoQuality, ytOptions.video_quality);
+          fillSelect(ytAudioQuality, ytOptions.audio_quality);
+          ytNotes.textContent = [
+            ...(ytOptions.notes || []),
+            ytOptions.ffmpeg ? "ffmpeg is installed." : "ffmpeg was not found on PATH.",
+          ].join(" ");
+          syncYoutubeFields();
+          if (!ytOptions.ffmpeg) {
+            showFfmpegInstall(
+              ytOptions.ffmpeg_install,
+              "ffmpeg is required for MP4 merge and MP3 conversion."
+            );
+          } else {
+            hideFfmpegInstall();
+          }
+        } catch (err) {
+          ytNotes.textContent = err.message;
+        }
+      }
+
+      for (const input of document.querySelectorAll('input[name="ytFormat"]')) {
+        input.addEventListener("change", syncYoutubeFields);
+      }
+      ytVideoQuality.addEventListener("change", syncYoutubeFields);
+      ytAudioQuality.addEventListener("change", syncYoutubeFields);
+
+      ytPreviewBtn.addEventListener("click", async () => {
+        clearYtOutput();
+        if (!ytUrl.value.trim()) {
+          setYtStatus("Paste a YouTube URL first.", true);
+          return;
+        }
+        setYtBusy(true);
+        setYtStatus("Loading video info…");
+        try {
+          const response = await fetch("/api/youtube/preview", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ url: ytUrl.value.trim() }),
+          });
+          if (!response.ok) await readError(response);
+          const data = await response.json();
+          const duration = formatDuration(data.duration);
+          ytMeta.hidden = false;
+          ytMeta.textContent = [data.title, data.uploader, duration].filter(Boolean).join(" · ");
+          if (data.thumbnail) {
+            ytPreview.hidden = false;
+            ytPreview.innerHTML = `<img alt="" src="${data.thumbnail}" /><div>${data.title}</div>`;
+          }
+          fillFilenameFromTitle(ytFilename, data.title, ytFormat() === "mp3" ? "mp3" : "mp4");
+          setYtStatus("Ready to download. You can edit the filename.");
+        } catch (err) {
+          setYtStatus(err.message, true);
+          if (err.install) showFfmpegInstall(err.install, err.message);
+        } finally {
+          setYtBusy(false);
+        }
+      });
+
+      ytDownloadBtn.addEventListener("click", async () => {
+        clearYtOutput();
+        if (!ytUrl.value.trim()) {
+          setYtStatus("Paste a YouTube URL first.", true);
+          return;
+        }
+        if (!ytFilename.value.trim()) {
+          setYtStatus("Enter a filename first.", true);
+          return;
+        }
+        setYtBusy(true);
+        setYtStatus("Downloading with yt-dlp…");
+        try {
+          const format = ytFormat();
+          const response = await fetch("/api/youtube/download", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              url: ytUrl.value.trim(),
+              format,
+              video_quality: ytVideoQuality.value || "best",
+              audio_quality: ytAudioQuality.value || "192",
+              filename: ytFilename.value.trim(),
+            }),
+          });
+          if (!response.ok) await readError(response);
+          const blob = await response.blob();
+          const fallback = filenameFromDisposition(
+            response.headers.get("Content-Disposition") || "",
+            format === "mp3" ? "youtube-audio.mp3" : "youtube-video.mp4"
+          );
+          triggerDownload(blob, fallback);
+          setYtStatus("Download started.");
+        } catch (err) {
+          setYtStatus(err.message, true);
+          if (err.install) showFfmpegInstall(err.install, err.message);
+        } finally {
+          setYtBusy(false);
+        }
+      });
+
+      ytUrl.addEventListener("keydown", (event) => {
+        if (event.key === "Enter") ytPreviewBtn.click();
+      });
+
+      loadYtOptions();
     </script>
   </body>
 </html>

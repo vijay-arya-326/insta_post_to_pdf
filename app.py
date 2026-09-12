@@ -1,18 +1,27 @@
 from __future__ import annotations
 
 import re
+import shutil
+import tempfile
 import time
 from pathlib import Path
 from threading import Lock
-from typing import Any
+from typing import Any, Literal
 from urllib.parse import quote
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel, Field
+from starlette.background import BackgroundTask
 
 from instagram import InstagramError, download_images, extract_shortcode, resolve_post
 from pdf import images_to_pdf, thumbnail_data_url
+from youtube import (
+    YoutubeError,
+    available_options,
+    download_video,
+    preview_video,
+)
 
 ROOT = Path(__file__).resolve().parent
 STATIC = ROOT / "static"
@@ -26,6 +35,14 @@ _cache_lock = Lock()
 
 class UrlBody(BaseModel):
     url: str = Field(min_length=8)
+
+
+class YoutubeBody(BaseModel):
+    url: str = Field(min_length=8)
+    format: Literal["mp4", "mp3"] = "mp4"
+    video_quality: str = "best"
+    audio_quality: str = "192"
+    filename: str = ""
 
 
 def pdf_filename(title: str | None, caption: str | None, shortcode: str) -> str:
@@ -130,4 +147,68 @@ async def pdf(body: UrlBody) -> Response:
         content=pdf_bytes,
         media_type="application/pdf",
         headers={"Content-Disposition": _disposition(filename)},
+    )
+
+
+def _youtube_http_error(exc: YoutubeError) -> HTTPException:
+    if exc.install:
+        return HTTPException(
+            status_code=400,
+            detail={
+                "message": str(exc),
+                "code": "ffmpeg_missing",
+                "install": exc.install,
+            },
+        )
+    return HTTPException(status_code=400, detail=str(exc))
+
+
+@app.get("/api/youtube/options")
+async def youtube_options() -> dict[str, Any]:
+    return available_options()
+
+
+@app.post("/api/youtube/preview")
+async def youtube_preview(body: UrlBody) -> dict[str, Any]:
+    try:
+        info = await preview_video(body.url)
+    except YoutubeError as exc:
+        raise _youtube_http_error(exc) from exc
+    return {
+        "id": info.id,
+        "title": info.title,
+        "uploader": info.uploader,
+        "duration": info.duration,
+        "thumbnail": info.thumbnail,
+        "url": info.webpage_url,
+    }
+
+
+@app.post("/api/youtube/download")
+async def youtube_download(body: YoutubeBody) -> FileResponse:
+    tmp = Path(tempfile.mkdtemp(prefix="yt-dlp-"))
+
+    def cleanup() -> None:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+    try:
+        info, path = await download_video(
+            body.url,
+            tmp,
+            body.format,
+            body.video_quality,
+            body.audio_quality,
+            body.filename,
+        )
+    except YoutubeError as exc:
+        cleanup()
+        raise _youtube_http_error(exc) from exc
+
+    filename = path.name
+    media_type = "audio/mpeg" if body.format == "mp3" else "video/mp4"
+    return FileResponse(
+        path,
+        media_type=media_type,
+        headers={"Content-Disposition": _disposition(filename)},
+        background=BackgroundTask(cleanup),
     )
