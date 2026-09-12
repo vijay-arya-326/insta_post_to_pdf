@@ -4,9 +4,9 @@ import asyncio
 import platform
 import re
 import shutil
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 from yt_dlp import YoutubeDL
 from yt_dlp.utils import DownloadError, ExtractorError
@@ -84,6 +84,15 @@ def ffmpeg_missing_error() -> YoutubeError:
 
 
 @dataclass
+class YoutubeEntry:
+    id: str
+    title: str
+    url: str
+    duration: int | None = None
+    thumbnail: str | None = None
+
+
+@dataclass
 class YoutubeInfo:
     id: str
     title: str
@@ -91,6 +100,8 @@ class YoutubeInfo:
     duration: int | None
     thumbnail: str | None
     webpage_url: str
+    is_playlist: bool = False
+    entries: list[YoutubeEntry] = field(default_factory=list)
 
 
 def available_options() -> dict:
@@ -99,13 +110,26 @@ def available_options() -> dict:
         "video_quality": list(VIDEO_QUALITIES),
         "audio_quality": list(AUDIO_QUALITIES),
         "notes": [
-            "Uses yt-dlp. Playlist links download only the first / linked video.",
+            "Uses yt-dlp. Playlists download one video at a time: each file finishes before the next starts.",
             "MP4 merge and MP3 conversion need ffmpeg on PATH.",
             "Best MP4 prefers mp4/m4a streams, then remuxes other codecs into MP4.",
         ],
         "ffmpeg": shutil.which("ffmpeg") is not None,
         "ffmpeg_install": ffmpeg_install_guide(),
     }
+
+
+def playlist_id_from_url(url: str) -> str | None:
+    parsed = urlparse(url.strip())
+    values = parse_qs(parsed.query).get("list") or []
+    playlist_id = (values[0] if values else "").strip()
+    if playlist_id:
+        return playlist_id
+    return None
+
+
+def playlist_page_url(playlist_id: str) -> str:
+    return f"https://www.youtube.com/playlist?list={playlist_id}"
 
 
 def assert_youtube_url(url: str) -> str:
@@ -140,8 +164,16 @@ def _base_opts() -> dict:
     }
 
 
-def _extract_sync(url: str) -> dict:
-    opts = {**_base_opts(), "skip_download": True, "ignore_no_formats_error": True}
+def _extract_sync(url: str, *, allow_playlist: bool = False, extract_flat: bool = False) -> dict:
+    opts = {
+        **_base_opts(),
+        "skip_download": True,
+        "ignore_no_formats_error": True,
+        "noplaylist": not allow_playlist,
+        "ignoreerrors": allow_playlist,
+    }
+    if extract_flat:
+        opts["extract_flat"] = True
     with YoutubeDL(opts) as ydl:
         return ydl.extract_info(url, download=False)
 
@@ -197,32 +229,98 @@ def _download_sync(
         return info, files[0]
 
 
+def _watch_url(video_id: str, entry: dict | None = None) -> str:
+    if entry:
+        webpage = str(entry.get("webpage_url") or "")
+        if "watch?v=" in webpage or "youtu.be/" in webpage:
+            return webpage
+        raw = str(entry.get("url") or "")
+        if raw.startswith("http") and ("watch?v=" in raw or "youtu.be/" in raw):
+            return raw
+    return f"https://www.youtube.com/watch?v={video_id}"
+
+
+def _duration(value: object) -> int | None:
+    if isinstance(value, (int, float)) and value >= 0:
+        return int(value)
+    return None
+
+
+def _entry_from_raw(entry: dict | None) -> YoutubeEntry | None:
+    if not entry or entry.get("_type") == "playlist":
+        return None
+    video_id = str(entry.get("id") or "").strip()
+    title = str(entry.get("title") or "").strip()
+    if not video_id or title.lower() in {"[deleted video]", "[private video]", "[unavailable]"}:
+        return None
+    thumb = entry.get("thumbnail")
+    if not thumb:
+        thumbs = entry.get("thumbnails") or []
+        if thumbs:
+            thumb = thumbs[-1].get("url")
+    return YoutubeEntry(
+        id=video_id,
+        title=title or video_id,
+        url=_watch_url(video_id, entry),
+        duration=_duration(entry.get("duration")),
+        thumbnail=thumb,
+    )
+
+
 def _info_from_raw(info: dict) -> YoutubeInfo:
     if info.get("_type") == "playlist":
-        entries = [entry for entry in (info.get("entries") or []) if entry]
+        entries = [_entry_from_raw(entry) for entry in (info.get("entries") or [])]
+        entries = [entry for entry in entries if entry]
         if not entries:
             raise YoutubeError("That playlist has no videos.")
-        info = entries[0]
-    video_id = str(info.get("id") or "")
-    title = str(info.get("title") or video_id or "YouTube video")
-    if not video_id:
+        playlist_id = str(info.get("id") or entries[0].id)
+        return YoutubeInfo(
+            id=playlist_id,
+            title=str(info.get("title") or "YouTube playlist"),
+            uploader=info.get("uploader") or info.get("channel"),
+            duration=None,
+            thumbnail=info.get("thumbnail") or entries[0].thumbnail,
+            webpage_url=str(info.get("webpage_url") or ""),
+            is_playlist=True,
+            entries=entries,
+        )
+    entry = _entry_from_raw(info)
+    if not entry:
         raise YoutubeError("Could not read that YouTube video.")
     return YoutubeInfo(
-        id=video_id,
-        title=title,
+        id=entry.id,
+        title=entry.title,
         uploader=info.get("uploader") or info.get("channel"),
-        duration=info.get("duration") if isinstance(info.get("duration"), int) else None,
-        thumbnail=info.get("thumbnail"),
-        webpage_url=str(info.get("webpage_url") or ""),
+        duration=entry.duration,
+        thumbnail=entry.thumbnail,
+        webpage_url=entry.url,
+        is_playlist=False,
+        entries=[entry],
     )
 
 
 async def preview_video(url: str) -> YoutubeInfo:
     url = assert_youtube_url(url)
+    playlist_id = playlist_id_from_url(url)
+    extract_url = playlist_page_url(playlist_id) if playlist_id else url
     try:
-        info = await asyncio.to_thread(_extract_sync, url)
+        info = await asyncio.to_thread(
+            _extract_sync, extract_url, allow_playlist=True, extract_flat=True
+        )
+        if playlist_id and (not info or info.get("_type") != "playlist"):
+            info = await asyncio.to_thread(
+                _extract_sync, url, allow_playlist=True, extract_flat=True
+            )
     except (DownloadError, ExtractorError) as exc:
-        raise _from_ydl_error(exc) from exc
+        if extract_url != url:
+            try:
+                info = await asyncio.to_thread(
+                    _extract_sync, url, allow_playlist=True, extract_flat=True
+                )
+            except Exception:
+                raise _from_ydl_error(exc) from exc
+        else:
+            raise _from_ydl_error(exc) from exc
     except YoutubeError:
         raise
     except Exception as exc:

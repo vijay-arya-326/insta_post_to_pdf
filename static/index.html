@@ -227,6 +227,15 @@
         border-radius: 10px;
         border: 1px solid var(--line);
       }
+      .playlist {
+        margin: 8px 0 0;
+        padding-left: 1.2em;
+        color: var(--muted);
+        font-size: 0.88rem;
+        line-height: 1.45;
+        max-height: 220px;
+        overflow: auto;
+      }
     </style>
   </head>
   <body>
@@ -267,7 +276,7 @@
         </div>
         <div class="row">
           <button class="ghost" id="previewBtn" type="button">Preview</button>
-          <button class="primary" id="pdfBtn" type="button">Download PDF</button>
+          <button class="primary" id="pdfBtn" type="button" disabled title="Preview first">Download PDF</button>
         </div>
         <p class="status" id="status"></p>
         <div class="meta" id="meta" hidden></div>
@@ -313,10 +322,17 @@
             <p class="hint" id="audioQualityHint">Highest common MP3 bitrate.</p>
           </div>
         </div>
+        <div class="field" id="ytPlaylistField" hidden>
+          <label class="choice">
+            <input type="checkbox" id="ytPlaylist" checked />
+            <span id="ytPlaylistLabel">Download all videos one by one</span>
+          </label>
+          <p class="hint">Each file finishes downloading before the next one starts.</p>
+        </div>
         <p class="hint" id="ytNotes"></p>
         <div class="row">
           <button class="ghost" id="ytPreviewBtn" type="button">Preview</button>
-          <button class="primary" id="ytDownloadBtn" type="button">Download</button>
+          <button class="primary" id="ytDownloadBtn" type="button" disabled title="Preview first">Download</button>
         </div>
         <p class="status" id="ytStatus"></p>
         <div class="install" id="ytInstall" hidden>
@@ -333,7 +349,7 @@
       const INSTAGRAM_LEDE =
         "Paste a public Instagram photo post. Every carousel slide (?img_index=1 through the last slide) becomes a page in a PDF. Image posts only — no login.";
       const YOUTUBE_LEDE =
-        "Paste a YouTube link and download the best MP4 (video) or MP3 (audio) with yt-dlp. ffmpeg is required to merge video and to convert audio.";
+        "Paste a YouTube link and download the best MP4 (video) or MP3 (audio) with yt-dlp. Playlists save one file at a time. ffmpeg is required to merge video and to convert audio.";
 
       const tabInstagram = document.getElementById("tab-instagram");
       const tabYoutube = document.getElementById("tab-youtube");
@@ -367,7 +383,12 @@
       const ytInstallOs = document.getElementById("ytInstallOs");
       const ytInstallSteps = document.getElementById("ytInstallSteps");
       const ytInstallCmd = document.getElementById("ytInstallCmd");
+      const ytPlaylistField = document.getElementById("ytPlaylistField");
+      const ytPlaylist = document.getElementById("ytPlaylist");
+      const ytPlaylistLabel = document.getElementById("ytPlaylistLabel");
       let ytOptions = null;
+      let ytLastPreview = null;
+      let igReady = false;
 
       function selectTab(name) {
         const instagram = name === "instagram";
@@ -384,7 +405,8 @@
 
       function setBusy(busy) {
         previewBtn.disabled = busy;
-        pdfBtn.disabled = busy;
+        pdfBtn.disabled = busy || !igReady;
+        pdfBtn.title = igReady ? "" : "Preview first";
         urlInput.disabled = busy;
         filenameInput.disabled = busy;
       }
@@ -438,7 +460,8 @@
       }
 
       function payload() {
-        return JSON.stringify({ url: urlInput.value.trim() });
+        const url = urlInput.dataset.previewUrl || urlInput.value.trim();
+        return JSON.stringify({ url });
       }
 
       async function readError(response) {
@@ -477,8 +500,11 @@
 
       previewBtn.addEventListener("click", async () => {
         clearOutput();
+        igReady = false;
+        delete urlInput.dataset.previewUrl;
         if (!urlInput.value.trim()) {
           setStatus("Paste an Instagram post URL first.", true);
+          setBusy(false);
           return;
         }
         setBusy(true);
@@ -487,10 +513,12 @@
           const response = await fetch("/api/preview", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: payload(),
+            body: JSON.stringify({ url: urlInput.value.trim() }),
           });
           if (!response.ok) await readError(response);
           const data = await response.json();
+          igReady = true;
+          urlInput.dataset.previewUrl = urlInput.value.trim();
           metaEl.hidden = false;
           metaEl.textContent = `${data.count} photo${data.count === 1 ? "" : "s"} from ${data.shortcode} (img_index 1–${data.count}).`;
           fillFilenameFromTitle(filenameInput, data.title || data.caption || data.shortcode, "pdf");
@@ -500,8 +528,9 @@
             card.innerHTML = `<img alt="Slide ${slide.index}" src="${slide.preview}" /><span>Slide ${slide.index} · ${slide.width}×${slide.height}</span>`;
             gridEl.appendChild(card);
           }
-          setStatus("Ready to download. You can edit the filename.");
+          setStatus("Preview ready. You can edit the filename, then Download PDF.");
         } catch (err) {
+          igReady = false;
           setStatus(err.message, true);
         } finally {
           setBusy(false);
@@ -509,9 +538,8 @@
       });
 
       pdfBtn.addEventListener("click", async () => {
-        clearOutput();
-        if (!urlInput.value.trim()) {
-          setStatus("Paste an Instagram post URL first.", true);
+        if (!igReady) {
+          setStatus("Preview the post first, then download.", true);
           return;
         }
         if (!filenameInput.value.trim()) {
@@ -543,6 +571,13 @@
 
       urlInput.addEventListener("keydown", (event) => {
         if (event.key === "Enter") previewBtn.click();
+      });
+      urlInput.addEventListener("input", () => {
+        if (!igReady) return;
+        igReady = false;
+        delete urlInput.dataset.previewUrl;
+        pdfBtn.disabled = true;
+        pdfBtn.title = "Preview first";
       });
 
       function ytFormat() {
@@ -578,11 +613,13 @@
 
       function setYtBusy(busy) {
         ytPreviewBtn.disabled = busy;
-        ytDownloadBtn.disabled = busy;
+        ytDownloadBtn.disabled = busy || !ytLastPreview;
+        ytDownloadBtn.title = ytLastPreview ? "" : "Preview first";
         ytUrl.disabled = busy;
         ytFilename.disabled = busy;
         ytVideoQuality.disabled = busy;
         ytAudioQuality.disabled = busy;
+        ytPlaylist.disabled = busy;
         for (const input of document.querySelectorAll('input[name="ytFormat"]')) input.disabled = busy;
       }
 
@@ -662,6 +699,8 @@
 
       ytPreviewBtn.addEventListener("click", async () => {
         clearYtOutput();
+        ytLastPreview = null;
+        ytPlaylistField.hidden = true;
         if (!ytUrl.value.trim()) {
           setYtStatus("Paste a YouTube URL first.", true);
           return;
@@ -676,15 +715,38 @@
           });
           if (!response.ok) await readError(response);
           const data = await response.json();
+          ytLastPreview = data;
           const duration = formatDuration(data.duration);
+          const playlist = Boolean(
+            (data.is_playlist || (data.entries && data.entries.length > 1)) &&
+              data.entries &&
+              data.entries.length > 1
+          );
           ytMeta.hidden = false;
-          ytMeta.textContent = [data.title, data.uploader, duration].filter(Boolean).join(" · ");
-          if (data.thumbnail) {
+          if (playlist) {
+            ytMeta.textContent = `${data.title} · ${data.count} videos${data.uploader ? " · " + data.uploader : ""}`;
+            ytPlaylist.checked = true;
+            ytPlaylistLabel.textContent = `Download all ${data.count} videos one by one`;
+            ytPlaylistField.hidden = false;
+            const shown = data.entries.slice(0, 25);
+            const extra = data.count - shown.length;
             ytPreview.hidden = false;
-            ytPreview.innerHTML = `<img alt="" src="${data.thumbnail}" /><div>${data.title}</div>`;
+            ytPreview.innerHTML =
+              (data.thumbnail ? `<img alt="" src="${data.thumbnail}" />` : "") +
+              `<div><div>${data.title}</div><ol class="playlist">${shown
+                .map((entry, index) => `<li>${index + 1}. ${entry.title}</li>`)
+                .join("")}${extra > 0 ? `<li>…and ${extra} more</li>` : ""}</ol></div>`;
+            fillFilenameFromTitle(ytFilename, data.title, ytFormat() === "mp3" ? "mp3" : "mp4");
+            setYtStatus("Preview ready. Videos will download one after another. Uncheck to save only the first video, then Download.");
+          } else {
+            ytMeta.textContent = [data.title, data.uploader, duration].filter(Boolean).join(" · ");
+            if (data.thumbnail) {
+              ytPreview.hidden = false;
+              ytPreview.innerHTML = `<img alt="" src="${data.thumbnail}" /><div>${data.title}</div>`;
+            }
+            fillFilenameFromTitle(ytFilename, data.title, ytFormat() === "mp3" ? "mp3" : "mp4");
+            setYtStatus("Preview ready. You can edit the filename, then Download.");
           }
-          fillFilenameFromTitle(ytFilename, data.title, ytFormat() === "mp3" ? "mp3" : "mp4");
-          setYtStatus("Ready to download. You can edit the filename.");
         } catch (err) {
           setYtStatus(err.message, true);
           if (err.install) showFfmpegInstall(err.install, err.message);
@@ -693,39 +755,88 @@
         }
       });
 
+      function playlistFileName(index, total, title, ext) {
+        const pad = String(index).padStart(String(total).length, "0");
+        const named = titleToFilename(title, ext) || `video-${pad}.${ext}`;
+        const stem = named.replace(/\.(mp4|mp3)$/i, "");
+        return `${pad} - ${stem}.${ext}`;
+      }
+
+      async function downloadOneVideo(url, filename, format) {
+        const response = await fetch("/api/youtube/download", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            url,
+            format,
+            video_quality: ytVideoQuality.value || "best",
+            audio_quality: ytAudioQuality.value || "192",
+            filename,
+          }),
+        });
+        if (!response.ok) await readError(response);
+        const blob = await response.blob();
+        const name = filenameFromDisposition(
+          response.headers.get("Content-Disposition") || "",
+          filename
+        );
+        triggerDownload(blob, name);
+      }
+
       ytDownloadBtn.addEventListener("click", async () => {
-        clearYtOutput();
-        if (!ytUrl.value.trim()) {
-          setYtStatus("Paste a YouTube URL first.", true);
+        if (!ytLastPreview) {
+          setYtStatus("Preview the video first, then download.", true);
           return;
         }
-        if (!ytFilename.value.trim()) {
+        const playlist =
+          Array.isArray(ytLastPreview.entries) &&
+          ytLastPreview.entries.length > 1 &&
+          ytPlaylist.checked;
+        if (!playlist && !ytFilename.value.trim()) {
           setYtStatus("Enter a filename first.", true);
           return;
         }
         setYtBusy(true);
-        setYtStatus("Downloading with yt-dlp…");
+        const format = ytFormat();
+        const ext = format === "mp3" ? "mp3" : "mp4";
+        const singleUrl =
+          ytLastPreview.entries?.[0]?.url || ytLastPreview.url || ytUrl.value.trim();
         try {
-          const format = ytFormat();
-          const response = await fetch("/api/youtube/download", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              url: ytUrl.value.trim(),
-              format,
-              video_quality: ytVideoQuality.value || "best",
-              audio_quality: ytAudioQuality.value || "192",
-              filename: ytFilename.value.trim(),
-            }),
-          });
-          if (!response.ok) await readError(response);
-          const blob = await response.blob();
-          const fallback = filenameFromDisposition(
-            response.headers.get("Content-Disposition") || "",
-            format === "mp3" ? "youtube-audio.mp3" : "youtube-video.mp4"
-          );
-          triggerDownload(blob, fallback);
-          setYtStatus("Download started.");
+          if (playlist) {
+            const entries = ytLastPreview.entries;
+            let ok = 0;
+            const failed = [];
+            for (let i = 0; i < entries.length; i++) {
+              const entry = entries[i];
+              setYtStatus(`Downloading ${i + 1} of ${entries.length}: ${entry.title}`);
+              try {
+                await downloadOneVideo(
+                  entry.url,
+                  playlistFileName(i + 1, entries.length, entry.title, ext),
+                  format
+                );
+                ok += 1;
+              } catch (err) {
+                if (err.install) {
+                  showFfmpegInstall(err.install, err.message);
+                  throw err;
+                }
+                failed.push(entry.title);
+              }
+            }
+            if (failed.length) {
+              setYtStatus(
+                `Finished ${ok} of ${entries.length}. Failed: ${failed.join(", ")}`,
+                true
+              );
+            } else {
+              setYtStatus(`Downloaded ${ok} of ${entries.length} videos.`);
+            }
+          } else {
+            setYtStatus("Downloading with yt-dlp…");
+            await downloadOneVideo(singleUrl, ytFilename.value.trim(), format);
+            setYtStatus("Download started.");
+          }
         } catch (err) {
           setYtStatus(err.message, true);
           if (err.install) showFfmpegInstall(err.install, err.message);
@@ -736,6 +847,13 @@
 
       ytUrl.addEventListener("keydown", (event) => {
         if (event.key === "Enter") ytPreviewBtn.click();
+      });
+      ytUrl.addEventListener("input", () => {
+        if (!ytLastPreview) return;
+        ytLastPreview = null;
+        ytPlaylistField.hidden = true;
+        ytDownloadBtn.disabled = true;
+        ytDownloadBtn.title = "Preview first";
       });
 
       loadYtOptions();

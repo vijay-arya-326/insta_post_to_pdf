@@ -181,6 +181,18 @@ async def youtube_preview(body: UrlBody) -> dict[str, Any]:
         "duration": info.duration,
         "thumbnail": info.thumbnail,
         "url": info.webpage_url,
+        "is_playlist": info.is_playlist,
+        "count": len(info.entries) if info.entries else 1,
+        "entries": [
+            {
+                "id": entry.id,
+                "title": entry.title,
+                "url": entry.url,
+                "duration": entry.duration,
+                "thumbnail": entry.thumbnail,
+            }
+            for entry in info.entries
+        ],
     }
 
 
