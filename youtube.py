@@ -17,7 +17,7 @@ _JOBS: dict[str, dict] = {}
 _JOBS_LOCK = Lock()
 
 VIDEO_QUALITIES = (
-    {"id": "best", "label": "Best available", "help": "Highest video and audio yt-dlp can merge to MP4"},
+    {"id": "best", "label": "Best available", "help": "Highest video and audio yt-dlp can merge"},
     {"id": "1080", "label": "1080p", "help": "Cap height at 1080, then pick the best stream"},
     {"id": "720", "label": "720p", "help": "Cap height at 720, then pick the best stream"},
     {"id": "480", "label": "480p", "help": "Cap height at 480, then pick the best stream"},
@@ -31,8 +31,11 @@ AUDIO_QUALITIES = (
 
 FORMATS = (
     {"id": "mp4", "label": "MP4 video", "help": "Best video + audio merged into MP4 (needs ffmpeg)"},
+    {"id": "webm", "label": "WebM video", "help": "Best VP9/Opus streams merged into WebM (needs ffmpeg)"},
     {"id": "mp3", "label": "MP3 audio", "help": "Audio only, converted to MP3 (needs ffmpeg)"},
 )
+VIDEO_KINDS = {"mp4", "webm"}
+AUDIO_KINDS = {"mp3"}
 
 
 class YoutubeError(Exception):
@@ -147,7 +150,7 @@ def _postprocessor_hook(job_id: str):
 
 def ffmpeg_missing_error() -> YoutubeError:
     return YoutubeError(
-        "ffmpeg is required for MP4 merge and MP3 conversion.",
+        "ffmpeg is required for MP4/WebM merge and MP3 conversion.",
         install=ffmpeg_install_guide(),
     )
 
@@ -180,8 +183,8 @@ def available_options() -> dict:
         "audio_quality": list(AUDIO_QUALITIES),
         "notes": [
             "Playlists save into your Videos folder (Movies on macOS), in a folder named after the playlist. Each video finishes before the next starts.",
-            "MP4 merge and MP3 conversion need ffmpeg on PATH.",
-            "Best MP4 prefers mp4/m4a streams, then remuxes other codecs into MP4.",
+            "MP4/WebM merge and MP3 conversion need ffmpeg on PATH.",
+            "Best MP4 prefers mp4/m4a streams. Best WebM prefers webm/opus streams.",
         ],
         "ffmpeg": shutil.which("ffmpeg") is not None,
         "ffmpeg_install": ffmpeg_install_guide(),
@@ -211,17 +214,32 @@ def assert_youtube_url(url: str) -> str:
     return text
 
 
+def _kind_ext(kind: str) -> str:
+    if kind == "mp3":
+        return "mp3"
+    if kind == "webm":
+        return "webm"
+    return "mp4"
+
+
 def _format_selector(kind: str, video_quality: str) -> str:
     if kind == "mp3":
         return "bestaudio/best"
     height = None if video_quality == "best" else video_quality
+    if kind == "webm":
+        vext, aext = "webm", "webm"
+    else:
+        vext, aext = "mp4", "m4a"
     if height:
         return (
-            f"bestvideo[height<={height}][ext=mp4]+bestaudio[ext=m4a]/"
+            f"bestvideo[height<={height}][ext={vext}]+bestaudio[ext={aext}]/"
             f"bestvideo[height<={height}]+bestaudio/"
-            f"best[height<={height}][ext=mp4]/best[height<={height}]"
+            f"best[height<={height}][ext={vext}]/best[height<={height}]"
         )
-    return "bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best[ext=mp4]/best"
+    return (
+        f"bestvideo[ext={vext}]+bestaudio[ext={aext}]/"
+        f"bestvideo+bestaudio/best[ext={vext}]/best"
+    )
 
 
 def _base_opts() -> dict:
@@ -256,7 +274,7 @@ def _download_sync(
     audio_quality: str,
     job_id: str = "",
 ) -> tuple[dict, Path]:
-    if kind in {"mp4", "mp3"} and not shutil.which("ffmpeg"):
+    if kind in VIDEO_KINDS | AUDIO_KINDS and not shutil.which("ffmpeg"):
         raise ffmpeg_missing_error()
 
     dest_dir.mkdir(parents=True, exist_ok=True)
@@ -273,10 +291,10 @@ def _download_sync(
         set_job_progress(job_id, phase="starting", label="Starting download")
         opts["progress_hooks"] = [_progress_hook(job_id)]
         opts["postprocessor_hooks"] = [_postprocessor_hook(job_id)]
-    if kind == "mp4":
-        opts["merge_output_format"] = "mp4"
-        opts["final_ext"] = "mp4"
-        opts["postprocessors"] = [{"key": "FFmpegVideoRemuxer", "preferedformat": "mp4"}]
+    if kind in VIDEO_KINDS:
+        opts["merge_output_format"] = kind
+        opts["final_ext"] = kind
+        opts["postprocessors"] = [{"key": "FFmpegVideoRemuxer", "preferedformat": kind}]
     else:
         opts["postprocessors"] = [
             {
@@ -292,7 +310,7 @@ def _download_sync(
             raise YoutubeError("Could not download that video.")
         prepared = ydl.prepare_filename(info)
         video_id = str(info.get("id") or "")
-        expected_ext = "mp3" if kind == "mp3" else "mp4"
+        expected_ext = _kind_ext(kind)
         candidates = [
             Path(prepared).with_suffix(f".{expected_ext}"),
             dest_dir / f"{video_id}.{expected_ext}",
@@ -419,8 +437,8 @@ async def download_video(
     job_id: str = "",
 ) -> tuple[YoutubeInfo, Path]:
     url = assert_youtube_url(url)
-    if kind not in {"mp4", "mp3"}:
-        raise YoutubeError("Format must be mp4 or mp3.")
+    if kind not in VIDEO_KINDS | AUDIO_KINDS:
+        raise YoutubeError("Format must be mp4, webm, or mp3.")
     allowed_video = {item["id"] for item in VIDEO_QUALITIES}
     allowed_audio = {item["id"] for item in AUDIO_QUALITIES}
     if video_quality not in allowed_video:
@@ -440,7 +458,7 @@ async def download_video(
         if "ffmpeg" in str(exc).lower():
             raise ffmpeg_missing_error() from exc
         raise YoutubeError(f"Could not download that video ({exc}).") from exc
-    ext = "mp3" if kind == "mp3" else "mp4"
+    ext = _kind_ext(kind)
     final_name = sanitize_download_name(output_name or meta.title, ext)
     final_path = dest_dir / final_name
     if path.resolve() != final_path.resolve():

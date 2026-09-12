@@ -349,6 +349,7 @@
             <label>Format</label>
             <div class="choice">
               <label><input type="radio" name="ytFormat" value="mp4" checked /> MP4 video</label>
+              <label><input type="radio" name="ytFormat" value="webm" /> WebM video</label>
               <label><input type="radio" name="ytFormat" value="mp3" /> MP3 audio</label>
             </div>
             <p class="hint" id="formatHint">Best video + audio merged into MP4 (needs ffmpeg).</p>
@@ -395,7 +396,7 @@
       const INSTAGRAM_LEDE =
         "Paste a public Instagram photo post. Every carousel slide (?img_index=1 through the last slide) becomes a page in a PDF. Image posts only — no login.";
       const YOUTUBE_LEDE =
-        "Paste a YouTube link and download the best MP4 (video) or MP3 (audio) with yt-dlp. Playlists save one file at a time. ffmpeg is required to merge video and to convert audio.";
+        "Paste a YouTube link and download the best MP4 or WebM (video) or MP3 (audio) with yt-dlp. Playlists save one file at a time. ffmpeg is required to merge video and to convert audio.";
 
       const tabInstagram = document.getElementById("tab-instagram");
       const tabYoutube = document.getElementById("tab-youtube");
@@ -496,7 +497,7 @@
       function swapFilenameExt(input, ext) {
         const name = input.value.trim();
         if (!name) return;
-        const stem = name.replace(/\.(mp4|mp3|pdf)$/i, "");
+        const stem = name.replace(/\.(mp4|webm|mp3|pdf)$/i, "");
         input.value = stem + "." + ext;
       }
 
@@ -642,6 +643,13 @@
         return document.querySelector('input[name="ytFormat"]:checked').value;
       }
 
+      function ytExt() {
+        const format = ytFormat();
+        if (format === "mp3") return "mp3";
+        if (format === "webm") return "webm";
+        return "mp4";
+      }
+
       function fillSelect(select, items) {
         select.innerHTML = "";
         for (const item of items) {
@@ -659,14 +667,15 @@
 
       function syncYoutubeFields() {
         const format = ytFormat();
-        const mp4 = format === "mp4";
-        videoQualityField.hidden = !mp4;
-        audioQualityField.hidden = mp4;
+        const ext = ytExt();
+        const video = format !== "mp3";
+        videoQualityField.hidden = !video;
+        audioQualityField.hidden = video;
         formatHint.textContent = hintFor(ytOptions?.formats, format, "");
         videoQualityHint.textContent = hintFor(ytOptions?.video_quality, ytVideoQuality.value, "");
         audioQualityHint.textContent = hintFor(ytOptions?.audio_quality, ytAudioQuality.value, "");
-        ytFilename.placeholder = mp4 ? "my-video.mp4" : "my-audio.mp3";
-        swapFilenameExt(ytFilename, mp4 ? "mp4" : "mp3");
+        ytFilename.placeholder = video ? `my-video.${ext}` : "my-audio.mp3";
+        swapFilenameExt(ytFilename, ext);
       }
 
       function setYtBusy(busy) {
@@ -763,7 +772,7 @@
           if (!ytOptions.ffmpeg) {
             showFfmpegInstall(
               ytOptions.ffmpeg_install,
-              "ffmpeg is required for MP4 merge and MP3 conversion."
+              "ffmpeg is required for MP4/WebM merge and MP3 conversion."
             );
           } else {
             hideFfmpegInstall();
@@ -821,7 +830,7 @@
               (data.thumbnail ? `<img alt="" src="${data.thumbnail}" />` : "") +
               `<div class="yt-preview-body">${escapeHtml(data.title)}</div>` +
               `<div class="playlist">${items}</div>`;
-            fillFilenameFromTitle(ytFilename, data.title, ytFormat() === "mp3" ? "mp3" : "mp4");
+            fillFilenameFromTitle(ytFilename, data.title, ytExt());
             setYtStatus("Preview ready. Playlist videos save into your Videos/Movies folder. Uncheck to download only the first video in the browser.");
           } else {
             ytMeta.textContent = [data.title, data.uploader, duration].filter(Boolean).join(" · ");
@@ -829,7 +838,7 @@
               ytPreview.hidden = false;
               ytPreview.innerHTML = `<img alt="" src="${data.thumbnail}" /><div>${data.title}</div>`;
             }
-            fillFilenameFromTitle(ytFilename, data.title, ytFormat() === "mp3" ? "mp3" : "mp4");
+            fillFilenameFromTitle(ytFilename, data.title, ytExt());
             setYtStatus("Preview ready. You can edit the filename, then Download.");
           }
         } catch (err) {
@@ -843,7 +852,7 @@
       function playlistFileName(index, total, title, ext) {
         const pad = String(index).padStart(String(total).length, "0");
         const named = titleToFilename(title, ext) || `video-${pad}.${ext}`;
-        const stem = named.replace(/\.(mp4|mp3)$/i, "");
+        const stem = named.replace(/\.(mp4|webm|mp3)$/i, "");
         return `${pad} - ${stem}.${ext}`;
       }
 
@@ -914,7 +923,7 @@
         }
         setYtBusy(true);
         const format = ytFormat();
-        const ext = format === "mp3" ? "mp3" : "mp4";
+        const ext = ytExt();
         const singleUrl =
           ytLastPreview.entries?.[0]?.url || ytLastPreview.url || ytUrl.value.trim();
         try {

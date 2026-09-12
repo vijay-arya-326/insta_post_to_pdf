@@ -41,7 +41,7 @@ class UrlBody(BaseModel):
 
 class YoutubeBody(BaseModel):
     url: str = Field(min_length=8)
-    format: Literal["mp4", "mp3"] = "mp4"
+    format: Literal["mp4", "webm", "mp3"] = "mp4"
     video_quality: str = "best"
     audio_quality: str = "192"
     filename: str = ""
@@ -222,7 +222,12 @@ async def youtube_download(body: YoutubeBody) -> FileResponse:
         raise _youtube_http_error(exc) from exc
 
     filename = path.name
-    media_type = "audio/mpeg" if body.format == "mp3" else "video/mp4"
+    if body.format == "mp3":
+        media_type = "audio/mpeg"
+    elif body.format == "webm":
+        media_type = "video/webm"
+    else:
+        media_type = "video/mp4"
     return FileResponse(
         path,
         media_type=media_type,
