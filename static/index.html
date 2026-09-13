@@ -76,6 +76,7 @@
         display: flex;
         gap: 10px;
         flex-wrap: wrap;
+        margin-top: 20px;
       }
       .row.actions {
         justify-content: space-between;
@@ -247,6 +248,7 @@
       }
       .yt-preview {
         display: flex;
+        flex-wrap: wrap;
         gap: 14px;
         margin-top: 16px;
         align-items: flex-start;
@@ -256,6 +258,27 @@
         max-width: 40%;
         border-radius: 10px;
         border: 1px solid var(--line);
+      }
+      .yt-preview-body {
+        flex: 1;
+        min-width: 0;
+      }
+      .playlist {
+        flex: 1 1 100%;
+        max-height: 280px;
+        overflow-y: auto;
+        padding: 12px 14px;
+        background: #0d1016;
+        border: 1px solid var(--line);
+        border-radius: 10px;
+      }
+      .playlist p {
+        margin: 0 0 12px;
+        line-height: 1.5;
+        font-size: 0.92rem;
+      }
+      .playlist p:last-child {
+        margin-bottom: 0;
       }
       .progress {
         margin-top: 16px;
@@ -283,6 +306,14 @@
         color: var(--muted);
         line-height: 1.4;
         white-space: pre-line;
+      }
+      .status-row {
+        display: block;
+        line-height: 1.6;
+      }
+      .status-row--error {
+        color: #ff6b6b;
+        font-size: 0.88rem;
       }
     </style>
   </head>
@@ -358,6 +389,7 @@
             <label>Format</label>
             <div class="choice">
               <label><input type="radio" name="ytFormat" value="mp4" checked /> MP4 video</label>
+              <label><input type="radio" name="ytFormat" value="webm" /> WebM video</label>
               <label><input type="radio" name="ytFormat" value="mp3" /> MP3 audio</label>
             </div>
             <p class="hint" id="formatHint">Best video + audio merged into MP4 (needs ffmpeg).</p>
@@ -372,6 +404,11 @@
             <select id="ytAudioQuality"></select>
             <p class="hint" id="audioQualityHint">Highest common MP3 bitrate.</p>
           </div>
+        </div>
+        <div class="field">
+          <label for="ytCookies">YouTube cookies</label>
+          <select id="ytCookies"></select>
+          <p class="hint" id="ytCookiesHint">YouTube may block downloads unless you are signed in. Pick the browser where you are logged in to YouTube.</p>
         </div>
         <div class="field" id="ytPlaylistField" hidden>
           <label class="choice">
@@ -407,7 +444,7 @@
       const INSTAGRAM_LEDE =
         "Paste a public Instagram photo post. Every carousel slide (?img_index=1 through the last slide) becomes a page in a PDF. Image posts only — no login.";
       const YOUTUBE_LEDE =
-        "Paste a YouTube link and download the best MP4 (video) or MP3 (audio) with yt-dlp. Playlists save one file at a time. ffmpeg is required to merge video and to convert audio.";
+        "Paste a YouTube link and download the best MP4 or WebM (video) or MP3 (audio) with yt-dlp. Playlists save one file at a time. ffmpeg is required to merge video and to convert audio.";
 
       const tabInstagram = document.getElementById("tab-instagram");
       const tabYoutube = document.getElementById("tab-youtube");
@@ -426,6 +463,7 @@
       const ytFilename = document.getElementById("ytFilename");
       const ytVideoQuality = document.getElementById("ytVideoQuality");
       const ytAudioQuality = document.getElementById("ytAudioQuality");
+      const ytCookies = document.getElementById("ytCookies");
       const ytPreviewBtn = document.getElementById("ytPreviewBtn");
       const ytResetBtn = document.getElementById("ytResetBtn");
       const ytDownloadBtn = document.getElementById("ytDownloadBtn");
@@ -515,7 +553,7 @@
       function swapFilenameExt(input, ext) {
         const name = input.value.trim();
         if (!name) return;
-        const stem = name.replace(/\.(mp4|mp3|pdf)$/i, "");
+        const stem = name.replace(/\.(mp4|webm|mp3|pdf)$/i, "");
         input.value = stem + "." + ext;
       }
 
@@ -557,6 +595,14 @@
         a.download = name;
         a.click();
         URL.revokeObjectURL(href);
+      }
+
+      function escapeHtml(text) {
+        return String(text)
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;");
       }
 
       function filenameFromDisposition(disposition, fallback) {
@@ -667,6 +713,21 @@
         return document.querySelector('input[name="ytFormat"]:checked').value;
       }
 
+      function ytExt() {
+        const format = ytFormat();
+        if (format === "mp3") return "mp3";
+        if (format === "webm") return "webm";
+        return "mp4";
+      }
+
+      function ytCookiesBrowser() {
+        return ytCookies.value || "chrome";
+      }
+
+      function ytCookieFields() {
+        return { cookies_from_browser: ytCookiesBrowser() };
+      }
+
       function fillSelect(select, items) {
         select.innerHTML = "";
         for (const item of items) {
@@ -684,14 +745,15 @@
 
       function syncYoutubeFields() {
         const format = ytFormat();
-        const mp4 = format === "mp4";
-        videoQualityField.hidden = !mp4;
-        audioQualityField.hidden = mp4;
+        const ext = ytExt();
+        const video = format !== "mp3";
+        videoQualityField.hidden = !video;
+        audioQualityField.hidden = video;
         formatHint.textContent = hintFor(ytOptions?.formats, format, "");
         videoQualityHint.textContent = hintFor(ytOptions?.video_quality, ytVideoQuality.value, "");
         audioQualityHint.textContent = hintFor(ytOptions?.audio_quality, ytAudioQuality.value, "");
-        ytFilename.placeholder = mp4 ? "my-video.mp4" : "my-audio.mp3";
-        swapFilenameExt(ytFilename, mp4 ? "mp4" : "mp3");
+        ytFilename.placeholder = video ? `my-video.${ext}` : "my-audio.mp3";
+        swapFilenameExt(ytFilename, ext);
       }
 
       function setYtBusy(busy) {
@@ -702,6 +764,7 @@
         ytFilename.disabled = busy;
         ytVideoQuality.disabled = busy;
         ytAudioQuality.disabled = busy;
+        ytCookies.disabled = busy;
         ytPlaylist.disabled = busy;
         for (const input of document.querySelectorAll('input[name="ytFormat"]')) input.disabled = busy;
         if (!busy && ytLastPreview) {
@@ -745,9 +808,20 @@
       }
 
       function setYtStatus(message, isError = false, isSuccess = false) {
-        ytStatus.textContent = message;
+        ytStatus.innerHTML = "";
         ytStatus.classList.toggle("error", isError);
         ytStatus.classList.toggle("success", Boolean(isSuccess) && !isError);
+        if (typeof message === "string") {
+          ytStatus.textContent = message;
+        } else if (Array.isArray(message)) {
+          // Each item: { text, error? }
+          message.forEach((item) => {
+            const span = document.createElement("span");
+            span.className = item.error ? "status-row status-row--error" : "status-row";
+            span.textContent = item.text;
+            ytStatus.appendChild(span);
+          });
+        }
       }
 
       function hideFfmpegInstall() {
@@ -785,6 +859,17 @@
           ytOptions = await response.json();
           fillSelect(ytVideoQuality, ytOptions.video_quality);
           fillSelect(ytAudioQuality, ytOptions.audio_quality);
+          fillSelect(ytCookies, ytOptions.cookie_browsers || []);
+          try {
+            const saved = localStorage.getItem("ytCookiesBrowser");
+            const allowed = [...ytCookies.options].map((option) => option.value);
+            ytCookies.value =
+              saved && allowed.includes(saved)
+                ? saved
+                : ytOptions.cookie_browser_default || "chrome";
+          } catch {
+            ytCookies.value = ytOptions.cookie_browser_default || "chrome";
+          }
           ytNotes.textContent = [
             ...(ytOptions.notes || []),
             ytOptions.ffmpeg ? "ffmpeg is installed." : "ffmpeg was not found on PATH.",
@@ -793,7 +878,7 @@
           if (!ytOptions.ffmpeg) {
             showFfmpegInstall(
               ytOptions.ffmpeg_install,
-              "ffmpeg is required for MP4 merge and MP3 conversion."
+              "ffmpeg is required for MP4/WebM merge and MP3 conversion."
             );
           } else {
             hideFfmpegInstall();
@@ -808,6 +893,11 @@
       }
       ytVideoQuality.addEventListener("change", syncYoutubeFields);
       ytAudioQuality.addEventListener("change", syncYoutubeFields);
+      ytCookies.addEventListener("change", () => {
+        try {
+          localStorage.setItem("ytCookiesBrowser", ytCookies.value);
+        } catch {}
+      });
 
       ytPreviewBtn.addEventListener("click", async () => {
         clearYtOutput();
@@ -823,7 +913,7 @@
           const response = await fetch("/api/youtube/preview", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ url: ytUrl.value.trim() }),
+            body: JSON.stringify({ url: ytUrl.value.trim(), ...ytCookieFields() }),
           });
           if (!response.ok) await readError(response);
           const data = await response.json();
@@ -843,15 +933,15 @@
             if (data.library_folder) {
               ytPlaylistHint.textContent = `Saves into ${data.library_folder}. Each file finishes before the next starts.`;
             }
-            const shown = data.entries.slice(0, 25);
-            const extra = data.count - shown.length;
+            const items = data.entries
+              .map((entry, index) => `<p>${index + 1}. ${escapeHtml(entry.title)}</p>`)
+              .join("");
             ytPreview.hidden = false;
             ytPreview.innerHTML =
               (data.thumbnail ? `<img alt="" src="${data.thumbnail}" />` : "") +
-              `<div><div>${data.title}</div><ol class="playlist">${shown
-                .map((entry, index) => `<li>${index + 1}. ${entry.title}</li>`)
-                .join("")}${extra > 0 ? `<li>…and ${extra} more</li>` : ""}</ol></div>`;
-            fillFilenameFromTitle(ytFilename, data.title, ytFormat() === "mp3" ? "mp3" : "mp4");
+              `<div class="yt-preview-body">${escapeHtml(data.title)}</div>` +
+              `<div class="playlist">${items}</div>`;
+            fillFilenameFromTitle(ytFilename, data.title, ytExt());
             setYtStatus("Preview ready. Playlist videos save into your Videos/Movies folder. Uncheck to download only the first video in the browser.");
           } else {
             ytMeta.textContent = [data.title, data.uploader, duration].filter(Boolean).join(" · ");
@@ -859,7 +949,7 @@
               ytPreview.hidden = false;
               ytPreview.innerHTML = `<img alt="" src="${data.thumbnail}" /><div>${data.title}</div>`;
             }
-            fillFilenameFromTitle(ytFilename, data.title, ytFormat() === "mp3" ? "mp3" : "mp4");
+            fillFilenameFromTitle(ytFilename, data.title, ytExt());
             setYtStatus("Preview ready. You can edit the filename, then Download.");
           }
         } catch (err) {
@@ -873,7 +963,7 @@
       function playlistFileName(index, total, title, ext) {
         const pad = String(index).padStart(String(total).length, "0");
         const named = titleToFilename(title, ext) || `video-${pad}.${ext}`;
-        const stem = named.replace(/\.(mp4|mp3)$/i, "");
+        const stem = named.replace(/\.(mp4|webm|mp3)$/i, "");
         return `${pad} - ${stem}.${ext}`;
       }
 
@@ -899,6 +989,7 @@
               filename,
               playlist_title: playlistTitle,
               job_id: jobId,
+              ...ytCookieFields(),
             }),
           });
           if (!response.ok) await readError(response);
@@ -918,6 +1009,7 @@
             video_quality: ytVideoQuality.value || "best",
             audio_quality: ytAudioQuality.value || "192",
             filename,
+            ...ytCookieFields(),
           }),
         });
         if (!response.ok) await readError(response);
@@ -944,7 +1036,7 @@
         }
         setYtBusy(true);
         const format = ytFormat();
-        const ext = format === "mp3" ? "mp3" : "mp4";
+        const ext = ytExt();
         const singleUrl =
           ytLastPreview.entries?.[0]?.url || ytLastPreview.url || ytUrl.value.trim();
         try {
@@ -952,7 +1044,7 @@
             const entries = ytLastPreview.entries;
             const folder = ytLastPreview.library_folder || ytLastPreview.title;
             let ok = 0;
-            const failed = [];
+            const failed = []; // { title, error }
             hideYtProgress();
             showYtProgress(1, entries.length, entries[0].title, folder, "Starting download");
             for (let i = 0; i < entries.length; i++) {
@@ -985,16 +1077,36 @@
                   showFfmpegInstall(err.install, err.message);
                   throw err;
                 }
-                failed.push(entry.title);
-                setYtStatus(`Step ${i + 1} of ${entries.length}: failed ${entry.title}`, true);
+                failed.push({ title: entry.title, error: err.message || "Unknown error" });
+                setYtStatus(`Step ${i + 1} of ${entries.length}: failed — ${entry.title}`, true);
               }
             }
             showYtProgress(entries.length, entries.length, "Playlist complete", folder, "Done", 100);
-            const summary = failed.length
-              ? `Playlist finished with errors.\nSaved ${ok} of ${entries.length} to:\n${folder}\nFailed: ${failed.join(", ")}`
-              : `Playlist download complete.\nSaved ${ok} of ${entries.length} videos to:\n${folder}`;
-            setYtStatus(summary, failed.length > 0, failed.length === 0);
-            window.alert(summary);
+            if (failed.length) {
+              // Build multi-row status: summary line + one red row per failure
+              const rows = [
+                { text: `Saved ${ok} of ${entries.length} videos. ${failed.length} failed:` },
+                ...failed.map((f) => ({ text: `✕ ${f.title} — ${f.error}`, error: true })),
+              ];
+              setYtStatus(rows, true, false);
+              window.alert("Completed with errors.");
+              // Show a Reload button instead of auto-reloading
+              const reloadBtn = document.createElement("button");
+              reloadBtn.textContent = "Reload";
+              reloadBtn.className = "ghost";
+              reloadBtn.style.marginTop = "10px";
+              reloadBtn.addEventListener("click", () => window.location.reload());
+              ytStatus.appendChild(reloadBtn);
+            } else {
+              setYtStatus(
+                `Playlist download complete. Saved ${ok} of ${entries.length} videos to: ${folder}`,
+                false,
+                true
+              );
+              await new Promise((resolve) => setTimeout(resolve, 2000));
+              window.alert(`Playlist download complete.\nSaved ${ok} of ${entries.length} videos to:\n${folder}`);
+              window.location.reload();
+            }
           } else {
             hideYtProgress();
             setYtStatus("Downloading with yt-dlp…");

@@ -40,14 +40,20 @@ class UrlBody(BaseModel):
     url: str = Field(min_length=8)
 
 
+class YoutubePreviewBody(BaseModel):
+    url: str = Field(min_length=8)
+    cookies_from_browser: str = ""
+
+
 class YoutubeBody(BaseModel):
     url: str = Field(min_length=8)
-    format: Literal["mp4", "mp3"] = "mp4"
+    format: Literal["mp4", "webm", "mp3"] = "mp4"
     video_quality: str = "best"
     audio_quality: str = "192"
     filename: str = ""
     playlist_title: str = ""
     job_id: str = ""
+    cookies_from_browser: str = ""
 
 
 def pdf_filename(title: str | None, caption: str | None, shortcode: str) -> str:
@@ -174,9 +180,9 @@ async def youtube_options() -> dict[str, Any]:
 
 
 @app.post("/api/youtube/preview")
-async def youtube_preview(body: UrlBody) -> dict[str, Any]:
+async def youtube_preview(body: YoutubePreviewBody) -> dict[str, Any]:
     try:
-        info = await preview_video(body.url)
+        info = await preview_video(body.url, body.cookies_from_browser)
     except YoutubeError as exc:
         raise _youtube_http_error(exc) from exc
     return {
@@ -217,13 +223,19 @@ async def youtube_download(body: YoutubeBody) -> FileResponse:
             body.video_quality,
             body.audio_quality,
             body.filename,
+            cookies_browser=body.cookies_from_browser,
         )
     except YoutubeError as exc:
         cleanup()
         raise _youtube_http_error(exc) from exc
 
     filename = path.name
-    media_type = "audio/mpeg" if body.format == "mp3" else "video/mp4"
+    if body.format == "mp3":
+        media_type = "audio/mpeg"
+    elif body.format == "webm":
+        media_type = "video/webm"
+    else:
+        media_type = "video/mp4"
     return FileResponse(
         path,
         media_type=media_type,
@@ -244,6 +256,7 @@ async def youtube_save(body: YoutubeBody) -> dict[str, Any]:
             body.audio_quality,
             body.filename,
             body.job_id,
+            body.cookies_from_browser,
         )
     except YoutubeError as exc:
         raise _youtube_http_error(exc) from exc
