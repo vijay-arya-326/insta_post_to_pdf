@@ -63,15 +63,15 @@ Leave that terminal open. Open the app in your browser:
 
 Your uploaded YouTube cookies live in `uploads/cookie.txt` (git-ignored). They are reused across restarts until you click **Remove cookies** or delete the file.
 
-## Start automatically when the OS starts
+## Start automatically when the OS starts (one-step install)
 
-Run `uv sync` once in this folder first. Autostart files live under `autostart/windows` and `autostart/macos`. They start the server **without** `--reload`.
+Each platform has a one-step installer that installs **uv** if missing, creates `.venv` and installs every package with `uv sync`, then adds the app to startup — all in one go. It starts the server **without** `--reload`.
 
 ### Windows
 
 Files: `autostart/windows/`
 
-1. Double-click `install-autostart.bat`. That adds a Startup shortcut to `start-hidden.vbs`, which launches uvicorn with no console window.
+1. **Double-click `install.bat`.** It checks/installs uv, runs `uv sync`, and adds a Startup shortcut to `start-hidden.vbs`, which launches uvicorn with no console window.
 2. Sign in again and open [http://127.0.0.1:8585](http://127.0.0.1:8585).
 
 To stop autostart, run `uninstall-autostart.bat`. To stop a running copy, end the `uvicorn`/`python` process in Task Manager (there is no window to close). Use `start-insta-post-to-pdf.bat` only if you want a visible console for debugging.
@@ -81,11 +81,11 @@ To stop autostart, run `uninstall-autostart.bat`. To stop a running copy, end th
 Files: `autostart/macos/`
 
 ```bash
-chmod +x autostart/macos/install-autostart.sh autostart/macos/uninstall-autostart.sh autostart/macos/start-insta-post-to-pdf.sh
-./autostart/macos/install-autostart.sh
+chmod +x autostart/macos/install.sh
+./autostart/macos/install.sh
 ```
 
-That writes a LaunchAgent from `com.local.insta-post-to-pdf.plist` and starts the helper script `start-insta-post-to-pdf.sh`.
+It checks/installs uv, runs `uv sync`, and writes a LaunchAgent from `com.local.insta-post-to-pdf.plist` that starts the helper script `start-insta-post-to-pdf.sh`.
 
 To stop and remove autostart:
 
@@ -95,41 +95,25 @@ To stop and remove autostart:
 
 ### Ubuntu
 
-1. Create `~/.config/systemd/user/insta-post-to-pdf.service`:
-
-```ini
-[Unit]
-Description=Instagram post to PDF
-After=network.target
-
-[Service]
-WorkingDirectory=PROJECT_DIR
-ExecStart=UV_PATH run uvicorn app:app --host 127.0.0.1 --port 8585
-Restart=on-failure
-
-[Install]
-WantedBy=default.target
-```
-
-`UV_PATH` is usually `/home/YOUR_USER/.local/bin/uv`.
-
-2. Enable it for your user session:
+Files: `autostart/ubuntu/`
 
 ```bash
-systemctl --user daemon-reload
-systemctl --user enable --now insta-post-to-pdf.service
+chmod +x autostart/ubuntu/install.sh
+./autostart/ubuntu/install.sh
 ```
 
-It starts when you log in. To also start it when you are not logged in:
+It checks/installs uv, runs `uv sync`, and creates `~/.config/systemd/user/insta-post-to-pdf.service` pointing at this project, then enables and starts it for your user session.
+
+To also start when you are not logged in:
 
 ```bash
 loginctl enable-linger "$USER"
 ```
 
-To stop and disable:
+To stop and remove autostart:
 
 ```bash
-systemctl --user disable --now insta-post-to-pdf.service
+./autostart/ubuntu/uninstall.sh
 ```
 
 ## How to use
