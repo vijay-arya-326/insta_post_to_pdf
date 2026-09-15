@@ -43,6 +43,7 @@ class UrlBody(BaseModel):
 class YoutubePreviewBody(BaseModel):
     url: str = Field(min_length=8)
     cookies_from_browser: str = ""
+    cookies_file: str = ""
 
 
 class YoutubeBody(BaseModel):
@@ -54,6 +55,7 @@ class YoutubeBody(BaseModel):
     playlist_title: str = ""
     job_id: str = ""
     cookies_from_browser: str = ""
+    cookies_file: str = ""
 
 
 def pdf_filename(title: str | None, caption: str | None, shortcode: str) -> str:
@@ -182,7 +184,7 @@ async def youtube_options() -> dict[str, Any]:
 @app.post("/api/youtube/preview")
 async def youtube_preview(body: YoutubePreviewBody) -> dict[str, Any]:
     try:
-        info = await preview_video(body.url, body.cookies_from_browser)
+        info = await preview_video(body.url, body.cookies_from_browser, body.cookies_file)
     except YoutubeError as exc:
         raise _youtube_http_error(exc) from exc
     return {
@@ -224,6 +226,7 @@ async def youtube_download(body: YoutubeBody) -> FileResponse:
             body.audio_quality,
             body.filename,
             cookies_browser=body.cookies_from_browser,
+            cookies_file=body.cookies_file,
         )
     except YoutubeError as exc:
         cleanup()
@@ -257,6 +260,7 @@ async def youtube_save(body: YoutubeBody) -> dict[str, Any]:
             body.filename,
             body.job_id,
             body.cookies_from_browser,
+            body.cookies_file,
         )
     except YoutubeError as exc:
         raise _youtube_http_error(exc) from exc

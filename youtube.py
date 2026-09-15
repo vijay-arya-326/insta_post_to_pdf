@@ -4,6 +4,7 @@ import asyncio
 import platform
 import re
 import shutil
+import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from threading import Lock
@@ -198,7 +199,25 @@ def normalize_cookie_browser(name: str) -> str:
     return text
 
 
-def _cookie_opts(browser: str) -> dict:
+def _temp_cookie_path(content: str) -> Path | None:
+    content = (content or "").strip()
+    if not content:
+        return None
+    if len(content) > 2_000_000:
+        raise YoutubeError("Cookie file is too large.")
+    handle = tempfile.NamedTemporaryFile(
+        mode="w", suffix=".txt", delete=False, encoding="utf-8"
+    )
+    try:
+        handle.write(content)
+    finally:
+        handle.close()
+    return Path(handle.name)
+
+
+def _cookie_opts(browser: str = "", cookies_file: str = "") -> dict:
+    if cookies_file:
+        return {"cookies": cookies_file}
     if not browser:
         return {}
     return {"cookiesfrombrowser": (browser,)}
@@ -339,19 +358,25 @@ def _extract_sync(
     allow_playlist: bool = False,
     extract_flat: bool = False,
     cookies_browser: str = "",
+    cookies_file: str = "",
 ) -> dict:
-    opts = {
-        **_base_opts(),
-        "skip_download": True,
-        "ignore_no_formats_error": True,
-        "noplaylist": not allow_playlist,
-        "ignoreerrors": allow_playlist,
-        **_cookie_opts(cookies_browser),
-    }
-    if extract_flat:
-        opts["extract_flat"] = True
-    with YoutubeDL(opts) as ydl:
-        return ydl.extract_info(url, download=False)
+    tmp = _temp_cookie_path(cookies_file)
+    try:
+        opts = {
+            **_base_opts(),
+            "skip_download": True,
+            "ignore_no_formats_error": True,
+            "noplaylist": not allow_playlist,
+            "ignoreerrors": allow_playlist,
+            **_cookie_opts(cookies_browser, str(tmp) if tmp else ""),
+        }
+        if extract_flat:
+            opts["extract_flat"] = True
+        with YoutubeDL(opts) as ydl:
+            return ydl.extract_info(url, download=False)
+    finally:
+        if tmp:
+            tmp.unlink(missing_ok=True)
 
 
 def _download_sync(
@@ -362,12 +387,42 @@ def _download_sync(
     audio_quality: str,
     job_id: str = "",
     cookies_browser: str = "",
+    cookies_file: str = "",
 ) -> tuple[dict, Path]:
     if kind in VIDEO_KINDS | AUDIO_KINDS and not shutil.which("ffmpeg"):
         raise ffmpeg_missing_error()
 
     dest_dir.mkdir(parents=True, exist_ok=True)
     outtmpl = str(dest_dir / "%(id)s.%(ext)s")
+    tmp = _temp_cookie_path(cookies_file)
+    try:
+        return _download_sync_with_opts(
+            url,
+            dest_dir,
+            kind,
+            video_quality,
+            audio_quality,
+            job_id,
+            outtmpl,
+            cookies_browser,
+            str(tmp) if tmp else "",
+        )
+    finally:
+        if tmp:
+            tmp.unlink(missing_ok=True)
+
+
+def _download_sync_with_opts(
+    url: str,
+    dest_dir: Path,
+    kind: str,
+    video_quality: str,
+    audio_quality: str,
+    job_id: str,
+    outtmpl: str,
+    cookies_browser: str,
+    cookies_file: str,
+) -> tuple[dict, Path]:
     opts: dict = {
         **_base_opts(),
         "format": _format_selector(kind, video_quality),
@@ -375,7 +430,7 @@ def _download_sync(
         "restrictfilenames": True,
         "noprogress": not bool(job_id),
         "no_color": True,
-        **_cookie_opts(cookies_browser),
+        **_cookie_opts(cookies_browser, cookies_file),
     }
     if job_id:
         set_job_progress(job_id, phase="starting", label="Starting download")
@@ -486,7 +541,9 @@ def _info_from_raw(info: dict) -> YoutubeInfo:
     )
 
 
-async def preview_video(url: str, cookies_browser: str = "") -> YoutubeInfo:
+async def preview_video(
+    url: str, cookies_browser: str = "", cookies_file: str = ""
+) -> YoutubeInfo:
     url = assert_youtube_url(url)
     cookies_browser = normalize_cookie_browser(cookies_browser)
     playlist_id = playlist_id_from_url(url)
@@ -498,6 +555,7 @@ async def preview_video(url: str, cookies_browser: str = "") -> YoutubeInfo:
             allow_playlist=True,
             extract_flat=True,
             cookies_browser=cookies_browser,
+            cookies_file=cookies_file,
         )
         if playlist_id and (not info or info.get("_type") != "playlist"):
             info = await asyncio.to_thread(
@@ -506,6 +564,7 @@ async def preview_video(url: str, cookies_browser: str = "") -> YoutubeInfo:
                 allow_playlist=True,
                 extract_flat=True,
                 cookies_browser=cookies_browser,
+                cookies_file=cookies_file,
             )
     except (DownloadError, ExtractorError) as exc:
         if extract_url != url:
@@ -516,6 +575,7 @@ async def preview_video(url: str, cookies_browser: str = "") -> YoutubeInfo:
                     allow_playlist=True,
                     extract_flat=True,
                     cookies_browser=cookies_browser,
+                    cookies_file=cookies_file,
                 )
             except Exception:
                 raise _from_ydl_error(exc, cookies_browser) from exc
@@ -541,6 +601,7 @@ async def download_video(
     output_name: str = "",
     job_id: str = "",
     cookies_browser: str = "",
+    cookies_file: str = "",
 ) -> tuple[YoutubeInfo, Path]:
     url = assert_youtube_url(url)
     cookies_browser = normalize_cookie_browser(cookies_browser)
@@ -562,6 +623,7 @@ async def download_video(
             audio_quality,
             job_id,
             cookies_browser,
+            cookies_file,
         )
         meta = _info_from_raw(info)
     except YoutubeError:
