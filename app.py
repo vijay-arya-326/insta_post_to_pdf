@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 import shutil
+import subprocess
 import tempfile
 import time
 from pathlib import Path
@@ -271,3 +272,101 @@ async def youtube_save(body: YoutubeBody) -> dict[str, Any]:
 @app.get("/api/youtube/job/{job_id}")
 async def youtube_job(job_id: str) -> dict[str, Any]:
     return get_job_progress(job_id)
+
+
+def _run_git(args: list[str], timeout: int = 30) -> tuple[bool, str]:
+    try:
+        proc = subprocess.run(
+            ["git", *args],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+    except FileNotFoundError:
+        return False, "git is not installed."
+    except subprocess.TimeoutExpired:
+        return False, f"git {' '.join(args)} timed out."
+    out = (proc.stdout or "").strip()
+    err = (proc.stderr or "").strip()
+    if proc.returncode != 0:
+        return False, err or out or f"git {' '.join(args)} failed."
+    return True, out
+
+
+@app.get("/api/update/check")
+async def update_check() -> dict[str, Any]:
+    ok, out = _run_git(["rev-parse", "--show-toplevel"])
+    if not ok:
+        return {"ok": False, "update_available": False, "error": "Not a git checkout."}
+    ok, branch = _run_git(["rev-parse", "--abbrev-ref", "HEAD"])
+    if not ok:
+        return {"ok": False, "update_available": False, "error": branch}
+    branch = branch.strip() or "main"
+    ok, current = _run_git(["rev-parse", "HEAD"])
+    if not ok:
+        return {"ok": False, "update_available": False, "error": current}
+    current = current.strip()
+
+    # Best-effort fetch so the check reflects the remote. Offline -> keep going
+    # with the last-fetched remote ref.
+    fetch_ok, fetch_out = _run_git(["fetch", "origin"], timeout=20)
+    fetch_error = None if fetch_ok else fetch_out
+
+    upstream = f"origin/{branch}"
+    ok, upstream_ref = _run_git(["rev-parse", "--verify", upstream])
+    if not ok:
+        # Fall back to whatever upstream is configured, if any.
+        ok, configured = _run_git(["rev-parse", "--abbrev-ref", "@{u}"])
+        if ok and configured:
+            upstream = configured.strip()
+            ok, upstream_ref = _run_git(["rev-parse", "--verify", upstream])
+        if not ok:
+            return {
+                "ok": False,
+                "update_available": False,
+                "branch": branch,
+                "current": current,
+                "error": f"Remote branch {upstream} not found.",
+                "fetch_error": fetch_error,
+            }
+    remote = upstream_ref.strip()
+
+    ok, behind_out = _run_git(["rev-list", "--count", f"HEAD..{upstream}"])
+    behind = int(behind_out.strip()) if ok and behind_out.strip().isdigit() else 0
+    ok, ahead_out = _run_git(["rev-list", "--count", f"{upstream}..HEAD"])
+    ahead = int(ahead_out.strip()) if ok and ahead_out.strip().isdigit() else 0
+    ok, log_out = _run_git(["log", "--oneline", "-10", f"HEAD..{upstream}"])
+    commits = log_out.splitlines() if ok and log_out else []
+    ok, dirty_out = _run_git(["status", "--porcelain"])
+    dirty = bool(ok and dirty_out.strip())
+
+    return {
+        "ok": True,
+        "update_available": behind > 0,
+        "behind": behind,
+        "ahead": ahead,
+        "branch": branch,
+        "upstream": upstream,
+        "current": current,
+        "latest": remote,
+        "commits": commits,
+        "dirty": dirty,
+        "fetch_error": fetch_error,
+        "repo": "https://github.com/vijay-arya-326/insta_post_to_pdf.git",
+    }
+
+
+@app.post("/api/update/apply")
+async def update_apply() -> dict[str, Any]:
+    ok, dirty_out = _run_git(["status", "--porcelain"])
+    if ok and dirty_out.strip():
+        raise HTTPException(
+            status_code=409,
+            detail="You have local changes. Commit or stash them before updating.",
+        )
+    ok, out = _run_git(["pull", "--ff-only"], timeout=120)
+    if not ok:
+        raise HTTPException(status_code=400, detail=f"Update failed: {out}")
+    _, new_head = _run_git(["rev-parse", "HEAD"])
+    return {"ok": True, "output": out, "current": new_head.strip()}

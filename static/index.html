@@ -32,6 +32,24 @@
         width: min(920px, calc(100% - 32px));
         margin: 48px auto 80px;
       }
+      .topbar {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 12px;
+        margin-bottom: 8px;
+      }
+      .topbar h1 {
+        margin: 0;
+      }
+      #updateBtn {
+        white-space: nowrap;
+        font-size: 0.85rem;
+        padding: 10px 14px;
+      }
+      #updateBtn.inactive {
+        opacity: 0.55;
+      }
       h1 {
         font-size: 2rem;
         letter-spacing: -0.03em;
@@ -77,6 +95,23 @@
         gap: 10px;
         flex-wrap: wrap;
         margin-top: 20px;
+      }
+      .row.actions {
+        justify-content: space-between;
+        align-items: center;
+      }
+      .actions-left {
+        display: flex;
+        gap: 10px;
+        flex-wrap: wrap;
+      }
+      button.danger {
+        background: #ef4444;
+        color: #fff;
+        border-color: transparent;
+      }
+      button.danger:hover {
+        background: #dc2626;
       }
       input[type="url"],
       input[type="text"],
@@ -150,6 +185,18 @@
       button:disabled {
         opacity: 0.55;
         cursor: not-allowed;
+      }
+      button.active {
+        background: #22c55e;
+        color: #0f1115;
+        border-color: transparent;
+      }
+      button.active:hover {
+        background: #16a34a;
+      }
+      button.primary.active {
+        background: #22c55e;
+        color: #0f1115;
       }
       .status {
         min-height: 1.4em;
@@ -290,7 +337,10 @@
   </head>
   <body>
     <main>
-      <h1>Insta Post to PDF</h1>
+      <div class="topbar">
+        <h1>Insta Post to PDF</h1>
+        <button class="ghost inactive" id="updateBtn" type="button" disabled title="Checking for updates…">Checking…</button>
+      </div>
       <p class="lede" id="lede">
         Paste a public Instagram photo post. Every carousel slide
         (<code>?img_index=1</code> through the last slide) becomes a page in a PDF.
@@ -324,9 +374,12 @@
             autocomplete="off"
           />
         </div>
-        <div class="row">
-          <button class="ghost" id="previewBtn" type="button">Preview</button>
-          <button class="primary" id="pdfBtn" type="button" disabled title="Preview first">Download PDF</button>
+        <div class="row actions">
+          <div class="actions-left">
+            <button class="primary active" id="previewBtn" type="button">Preview</button>
+            <button class="primary" id="pdfBtn" type="button" disabled title="Preview first">Download PDF</button>
+          </div>
+          <button class="danger" id="resetBtn" type="button" title="Reset form">Reset</button>
         </div>
         <p class="status" id="status"></p>
         <div class="meta" id="meta" hidden></div>
@@ -386,9 +439,12 @@
           <p class="hint" id="ytPlaylistHint">Each file is saved into your Videos folder, in a folder named after the playlist. The next video starts only after the current one finishes.</p>
         </div>
         <p class="hint" id="ytNotes"></p>
-        <div class="row">
-          <button class="ghost" id="ytPreviewBtn" type="button">Preview</button>
-          <button class="primary" id="ytDownloadBtn" type="button" disabled title="Preview first">Download</button>
+        <div class="row actions">
+          <div class="actions-left">
+            <button class="primary active" id="ytPreviewBtn" type="button">Preview</button>
+            <button class="primary" id="ytDownloadBtn" type="button" disabled title="Preview first">Download</button>
+          </div>
+          <button class="danger" id="ytResetBtn" type="button" title="Reset form">Reset</button>
         </div>
         <p class="status" id="ytStatus"></p>
         <div class="progress" id="ytProgress">
@@ -419,6 +475,7 @@
       const urlInput = document.getElementById("url");
       const filenameInput = document.getElementById("filename");
       const previewBtn = document.getElementById("previewBtn");
+      const resetBtn = document.getElementById("resetBtn");
       const pdfBtn = document.getElementById("pdfBtn");
       const statusEl = document.getElementById("status");
       const metaEl = document.getElementById("meta");
@@ -429,6 +486,7 @@
       const ytAudioQuality = document.getElementById("ytAudioQuality");
       const ytCookies = document.getElementById("ytCookies");
       const ytPreviewBtn = document.getElementById("ytPreviewBtn");
+      const ytResetBtn = document.getElementById("ytResetBtn");
       const ytDownloadBtn = document.getElementById("ytDownloadBtn");
       const ytStatus = document.getElementById("ytStatus");
       const ytMeta = document.getElementById("ytMeta");
@@ -474,6 +532,11 @@
         pdfBtn.title = igReady ? "" : "Preview first";
         urlInput.disabled = busy;
         filenameInput.disabled = busy;
+        if (!busy && igReady) {
+          pdfBtn.classList.add("active");
+        } else {
+          pdfBtn.classList.remove("active");
+        }
       }
 
       function clearOutput() {
@@ -645,12 +708,26 @@
       urlInput.addEventListener("keydown", (event) => {
         if (event.key === "Enter") previewBtn.click();
       });
+
+      resetBtn.addEventListener("click", () => {
+        if (!confirm("Are you sure you want to reset? This will clear the preview and filename.")) return;
+        clearOutput();
+        igReady = false;
+        delete urlInput.dataset.previewUrl;
+        urlInput.value = "";
+        filenameInput.value = "";
+        pdfBtn.disabled = true;
+        pdfBtn.title = "Preview first";
+        pdfBtn.classList.remove("active");
+        setStatus("");
+      });
       urlInput.addEventListener("input", () => {
         if (!igReady) return;
         igReady = false;
         delete urlInput.dataset.previewUrl;
         pdfBtn.disabled = true;
         pdfBtn.title = "Preview first";
+        pdfBtn.classList.remove("active");
       });
 
       function ytFormat() {
@@ -711,6 +788,11 @@
         ytCookies.disabled = busy;
         ytPlaylist.disabled = busy;
         for (const input of document.querySelectorAll('input[name="ytFormat"]')) input.disabled = busy;
+        if (!busy && ytLastPreview) {
+          ytDownloadBtn.classList.add("active");
+        } else {
+          ytDownloadBtn.classList.remove("active");
+        }
       }
 
       function clearYtOutput() {
@@ -1063,15 +1145,105 @@
       ytUrl.addEventListener("keydown", (event) => {
         if (event.key === "Enter") ytPreviewBtn.click();
       });
+      ytResetBtn.addEventListener("click", () => {
+        if (!confirm("Are you sure you want to reset? This will clear the preview and filename.")) return;
+        clearYtOutput();
+        ytLastPreview = null;
+        ytPlaylistField.hidden = true;
+        ytUrl.value = "";
+        ytFilename.value = "";
+        ytDownloadBtn.disabled = true;
+        ytDownloadBtn.title = "Preview first";
+        ytDownloadBtn.classList.remove("active");
+        setYtStatus("");
+      });
       ytUrl.addEventListener("input", () => {
         if (!ytLastPreview) return;
         ytLastPreview = null;
         ytPlaylistField.hidden = true;
         ytDownloadBtn.disabled = true;
         ytDownloadBtn.title = "Preview first";
+        ytDownloadBtn.classList.remove("active");
+      });
+
+      const updateBtn = document.getElementById("updateBtn");
+      let pendingUpdate = null;
+
+      function renderUpdateBtn(state, detail) {
+        updateBtn.classList.remove("active", "inactive");
+        if (state === "available") {
+          updateBtn.disabled = false;
+          updateBtn.textContent = `Update (${detail.behind})`;
+          updateBtn.title = `Update available: ${detail.behind} commit(s) behind ${detail.upstream}. Click to update.`;
+          updateBtn.classList.add("active");
+        } else if (state === "checking") {
+          updateBtn.disabled = true;
+          updateBtn.textContent = "Checking…";
+          updateBtn.title = "Checking for updates…";
+          updateBtn.classList.add("inactive");
+        } else if (state === "uptodate") {
+          updateBtn.disabled = true;
+          updateBtn.textContent = "Up to date";
+          updateBtn.title = "No updates available.";
+          updateBtn.classList.add("inactive");
+        } else {
+          updateBtn.disabled = false;
+          updateBtn.textContent = "Check update";
+          updateBtn.title = detail || "Check for updates.";
+          updateBtn.classList.add("inactive");
+        }
+      }
+
+      async function checkForUpdate(silent = true) {
+        renderUpdateBtn("checking");
+        try {
+          const response = await fetch("/api/update/check");
+          const data = await response.json();
+          if (!data.ok) throw new Error(data.error || "Update check failed.");
+          if (data.update_available) {
+            pendingUpdate = data;
+            renderUpdateBtn("available", data);
+          } else {
+            pendingUpdate = null;
+            renderUpdateBtn("uptodate");
+          }
+          if (!silent && !data.update_available) window.alert("Already up to date.");
+          return data;
+        } catch (err) {
+          pendingUpdate = null;
+          renderUpdateBtn("error", err.message);
+          if (!silent) window.alert(`Update check failed: ${err.message}`);
+          return null;
+        }
+      }
+
+      updateBtn.addEventListener("click", async () => {
+        if (!pendingUpdate) {
+          await checkForUpdate(false);
+          return;
+        }
+        const lines = [
+          `${pendingUpdate.behind} update(s) available from ${pendingUpdate.upstream}.`,
+          ...(pendingUpdate.commits || []),
+          "Update now? The page will reload afterwards.",
+        ].join("\n");
+        if (!confirm(lines)) return;
+        updateBtn.disabled = true;
+        updateBtn.textContent = "Updating…";
+        try {
+          const response = await fetch("/api/update/apply", { method: "POST" });
+          const data = await response.json().catch(() => ({}));
+          if (!response.ok) throw new Error(data.detail || "Update failed.");
+          window.alert("Updated. Reloading to load the new version.");
+          window.location.reload();
+        } catch (err) {
+          window.alert(`Update failed: ${err.message}`);
+          await checkForUpdate(true);
+        }
       });
 
       loadYtOptions();
+      checkForUpdate(true);
     </script>
   </body>
 </html>
