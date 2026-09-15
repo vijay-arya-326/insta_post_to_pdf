@@ -20,10 +20,13 @@ from pdf import images_to_pdf, thumbnail_data_url
 from youtube import (
     YoutubeError,
     available_options,
+    cookie_file_info,
+    delete_cookie_file,
     download_video,
     get_job_progress,
     playlist_library_dir,
     preview_video,
+    save_cookie_file,
 )
 
 ROOT = Path(__file__).resolve().parent
@@ -56,6 +59,10 @@ class YoutubeBody(BaseModel):
     job_id: str = ""
     cookies_from_browser: str = ""
     cookies_file: str = ""
+
+
+class CookieUploadBody(BaseModel):
+    content: str = Field(min_length=1)
 
 
 def pdf_filename(title: str | None, caption: str | None, shortcode: str) -> str:
@@ -179,6 +186,26 @@ def _youtube_http_error(exc: YoutubeError) -> HTTPException:
 @app.get("/api/youtube/options")
 async def youtube_options() -> dict[str, Any]:
     return available_options()
+
+
+@app.get("/api/youtube/cookies")
+async def youtube_cookies_status() -> dict[str, Any]:
+    return cookie_file_info()
+
+
+@app.post("/api/youtube/cookies")
+async def youtube_cookies_upload(body: CookieUploadBody) -> dict[str, Any]:
+    try:
+        save_cookie_file(body.content)
+    except YoutubeError as exc:
+        raise _youtube_http_error(exc) from exc
+    return cookie_file_info()
+
+
+@app.delete("/api/youtube/cookies")
+async def youtube_cookies_delete() -> dict[str, Any]:
+    delete_cookie_file()
+    return cookie_file_info()
 
 
 @app.post("/api/youtube/preview")

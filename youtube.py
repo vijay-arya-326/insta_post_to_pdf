@@ -4,7 +4,6 @@ import asyncio
 import platform
 import re
 import shutil
-import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from threading import Lock
@@ -199,20 +198,64 @@ def normalize_cookie_browser(name: str) -> str:
     return text
 
 
-def _temp_cookie_path(content: str) -> Path | None:
+UPLOADS_DIR = Path(__file__).resolve().parent / "uploads"
+UPLOADED_COOKIE_FILE = UPLOADS_DIR / "cookie.txt"
+
+
+def save_cookie_file(content: str) -> Path | None:
+    """Save (overwrite) the uploaded cookie file as ``uploads/cookie.txt``."""
     content = (content or "").strip()
     if not content:
         return None
     if len(content) > 2_000_000:
         raise YoutubeError("Cookie file is too large.")
-    handle = tempfile.NamedTemporaryFile(
-        mode="w", suffix=".txt", delete=False, encoding="utf-8"
-    )
+    UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
+    UPLOADED_COOKIE_FILE.write_text(content, encoding="utf-8")
+    return UPLOADED_COOKIE_FILE
+
+
+_EMAIL_RE = re.compile(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}")
+
+
+def cookie_file_info() -> dict:
+    p = UPLOADED_COOKIE_FILE
+    empty = {
+        "exists": False,
+        "file": "",
+        "size": 0,
+        "count": 0,
+        "modified": None,
+        "identity": None,
+        "content": "",
+    }
+    if not p.is_file():
+        return empty
     try:
-        handle.write(content)
-    finally:
-        handle.close()
-    return Path(handle.name)
+        text = p.read_text(encoding="utf-8")
+    except OSError:
+        return empty
+    count = 0
+    emails: list[str] = []
+    for line in text.splitlines():
+        if not line.strip() or line.startswith("#"):
+            continue
+        count += 1
+        emails.extend(_EMAIL_RE.findall(line))
+    stat = p.stat()
+    return {
+        "exists": True,
+        "file": p.name,
+        "size": stat.st_size,
+        "count": count,
+        "modified": stat.st_mtime,
+        "identity": sorted(set(emails))[0] if emails else None,
+        "content": text,
+    }
+
+
+def delete_cookie_file() -> bool:
+    UPLOADED_COOKIE_FILE.unlink(missing_ok=True)
+    return not UPLOADED_COOKIE_FILE.exists()
 
 
 def _cookie_opts(browser: str = "", cookies_file: str = "") -> dict:
@@ -347,7 +390,12 @@ def _base_opts() -> dict:
         # then raises "Requested format is not available".
         # The solver script is downloaded from GitHub on first use and cached.
         "allow_unplayable_formats": False,
-        "extractor_args": {"youtube": {"player_client": ["web_creator", "tv"]}},
+        # web_embedded MUST stay first: with signed-in cookies, web_creator/tv
+        # are rejected by YouTube ("Please sign in...") while web_embedded works.
+        # web_embedded alone also handles the signed-out case without PO-token.
+        "extractor_args": {
+            "youtube": {"player_client": ["web_embedded", "web_creator", "tv"]}
+        },
         "remote_components": ["ejs:github"],
     }
 
@@ -360,23 +408,19 @@ def _extract_sync(
     cookies_browser: str = "",
     cookies_file: str = "",
 ) -> dict:
-    tmp = _temp_cookie_path(cookies_file)
-    try:
-        opts = {
-            **_base_opts(),
-            "skip_download": True,
-            "ignore_no_formats_error": True,
-            "noplaylist": not allow_playlist,
-            "ignoreerrors": allow_playlist,
-            **_cookie_opts(cookies_browser, str(tmp) if tmp else ""),
-        }
-        if extract_flat:
-            opts["extract_flat"] = True
-        with YoutubeDL(opts) as ydl:
-            return ydl.extract_info(url, download=False)
-    finally:
-        if tmp:
-            tmp.unlink(missing_ok=True)
+    saved = save_cookie_file(cookies_file)
+    opts = {
+        **_base_opts(),
+        "skip_download": True,
+        "ignore_no_formats_error": True,
+        "noplaylist": not allow_playlist,
+        "ignoreerrors": allow_playlist,
+        **_cookie_opts(cookies_browser, str(saved) if saved else ""),
+    }
+    if extract_flat:
+        opts["extract_flat"] = True
+    with YoutubeDL(opts) as ydl:
+        return ydl.extract_info(url, download=False)
 
 
 def _download_sync(
@@ -394,22 +438,18 @@ def _download_sync(
 
     dest_dir.mkdir(parents=True, exist_ok=True)
     outtmpl = str(dest_dir / "%(id)s.%(ext)s")
-    tmp = _temp_cookie_path(cookies_file)
-    try:
-        return _download_sync_with_opts(
-            url,
-            dest_dir,
-            kind,
-            video_quality,
-            audio_quality,
-            job_id,
-            outtmpl,
-            cookies_browser,
-            str(tmp) if tmp else "",
-        )
-    finally:
-        if tmp:
-            tmp.unlink(missing_ok=True)
+    saved = save_cookie_file(cookies_file)
+    return _download_sync_with_opts(
+        url,
+        dest_dir,
+        kind,
+        video_quality,
+        audio_quality,
+        job_id,
+        outtmpl,
+        cookies_browser,
+        str(saved) if saved else "",
+    )
 
 
 def _download_sync_with_opts(

@@ -184,6 +184,48 @@
         color: #a0522d;
         font-weight: 600;
       }
+      .cookie-upload-box {
+        margin: 10px 0 0;
+        padding: 12px 14px;
+        border: 1px solid #34a853;
+        border-radius: 10px;
+        background: #e6f7e6;
+        color: #1b5e20;
+        font-size: 0.8rem;
+        line-height: 1.5;
+      }
+      .cookie-upload-box strong {
+        display: block;
+        margin-bottom: 6px;
+        color: #145214;
+        font-size: 0.9rem;
+      }
+      .cookie-upload-box details {
+        margin: 8px 0;
+      }
+      .cookie-upload-box summary {
+        cursor: pointer;
+        user-select: none;
+        color: #1b5e20;
+        font-weight: 600;
+      }
+      .cookie-upload-box pre {
+        margin: 8px 0 0;
+        padding: 10px;
+        max-height: 180px;
+        overflow: auto;
+        background: #ffffffcc;
+        border: 1px solid #34a85366;
+        border-radius: 8px;
+        font-size: 0.72rem;
+        line-height: 1.35;
+        color: #2c5e2e;
+        white-space: pre-wrap;
+        word-break: break-all;
+      }
+      .cookie-upload-box .danger {
+        margin-top: 4px;
+      }
       button {
         border: 0;
         border-radius: 10px;
@@ -451,9 +493,11 @@
           <p class="hint" id="ytCookiesHint">YouTube may block downloads unless you are signed in. Pick the browser where you are logged in to YouTube.</p>
         </div>
         <div class="field" id="ytCookieFileField" hidden>
-          <label for="ytCookieFile">Cookie file</label>
-          <input type="file" id="ytCookieFile" accept=".txt,text/plain" />
-          <div class="hint-box">
+          <div id="ytCookieUploadControls">
+            <label for="ytCookieFile">Cookie file</label>
+            <input type="file" id="ytCookieFile" accept=".txt,text/plain" />
+          </div>
+          <div class="hint-box" id="ytCookieHintBox">
             <strong>Hint to download Cookies as txt file from youtube</strong>
             Sign in to YouTube, export your cookies as a <code>cookies.txt</code> file (Netscape format), then attach it here:
             <ul>
@@ -461,6 +505,15 @@
               <li>Firefox: <a href="https://addons.mozilla.org/en-US/firefox/addon/get-cookies-txt-locally/" target="_blank" rel="noopener">download from addons.mozilla.org</a></li>
               <li>Safari: pick Safari in the dropdown instead.</li>
             </ul>
+          </div>
+          <div class="cookie-upload-box" id="ytCookieUploadBox" hidden>
+            <strong id="ytCookieUploadTitle">YouTube session ready</strong>
+            <p id="ytCookieUploadMsg" class="hint"></p>
+            <details class="cookie-content" id="ytCookieContentDetails">
+              <summary>Show cookie content</summary>
+              <pre id="ytCookieContentPreview"></pre>
+            </details>
+            <button class="danger" id="ytCookieRemoveBtn" type="button">Remove cookies</button>
           </div>
         </div>
         <div class="field" id="ytPlaylistField" hidden>
@@ -519,6 +572,13 @@
       const ytCookies = document.getElementById("ytCookies");
       const ytCookieFile = document.getElementById("ytCookieFile");
       const ytCookieFileField = document.getElementById("ytCookieFileField");
+      const ytCookieUploadControls = document.getElementById("ytCookieUploadControls");
+      const ytCookieHintBox = document.getElementById("ytCookieHintBox");
+      const ytCookieUploadBox = document.getElementById("ytCookieUploadBox");
+      const ytCookieUploadTitle = document.getElementById("ytCookieUploadTitle");
+      const ytCookieUploadMsg = document.getElementById("ytCookieUploadMsg");
+      const ytCookieContentPreview = document.getElementById("ytCookieContentPreview");
+      const ytCookieRemoveBtn = document.getElementById("ytCookieRemoveBtn");
       const ytPreviewBtn = document.getElementById("ytPreviewBtn");
       const ytResetBtn = document.getElementById("ytResetBtn");
       const ytDownloadBtn = document.getElementById("ytDownloadBtn");
@@ -788,6 +848,67 @@
         ytCookieFileField.hidden = ytCookies.value !== YT_COOKIES_OPTION;
       }
 
+      async function refreshCookieStatus() {
+        try {
+          const r = await fetch("/api/youtube/cookies");
+          if (!r.ok) return;
+          const info = await r.json();
+          if (info.exists) {
+            ytCookieHintBox.hidden = true;
+            ytCookieUploadControls.hidden = true;
+            ytCookieUploadBox.hidden = false;
+            ytCookieUploadTitle.textContent = "YouTube session ready";
+            ytCookieUploadMsg.textContent = info.identity
+              ? `You will be logged in as ${info.identity}`
+              : `Signed-in cookie file ready (${info.count} cookies from ${info.file})`;
+            ytCookieContentPreview.textContent = info.content || "";
+          } else {
+            ytCookieHintBox.hidden = false;
+            ytCookieUploadControls.hidden = false;
+            ytCookieUploadBox.hidden = true;
+            ytCookieContentPreview.textContent = "";
+          }
+        } catch {}
+      }
+
+      async function handleCookieFileUpload(file) {
+        const reader = new FileReader();
+        reader.onerror = () => setYtStatus("Could not read the cookie file.", true);
+        reader.onload = async () => {
+          const content = String(reader.result || "");
+          if (!content) {
+            setYtStatus("The cookie file is empty.", true);
+            return;
+          }
+          try {
+            const r = await fetch("/api/youtube/cookies", {
+              method: "POST",
+              headers: {"Content-Type": "application/json"},
+              body: JSON.stringify({content}),
+            });
+            if (!r.ok) await readError(r);
+            ytCookieFileContent = content;
+            await refreshCookieStatus();
+            setYtStatus(`Cookie file ${file.name} uploaded. You can use Preview and Download.`, false, true);
+          } catch (err) {
+            setYtStatus(`Cookie upload failed: ${err.message}`, true);
+          }
+        };
+        reader.readAsText(file);
+      }
+
+      async function removeCookieFile() {
+        try {
+          await fetch("/api/youtube/cookies", {method: "DELETE"});
+          ytCookieFileContent = "";
+          ytCookieFile.value = "";
+          await refreshCookieStatus();
+          setYtStatus("Cookie file removed.", false, true);
+        } catch (err) {
+          setYtStatus(`Could not remove cookie file: ${err.message}`, true);
+        }
+      }
+
       function ytCookieFields() {
         const fields = {};
         if (ytCookieFileContent) {
@@ -982,16 +1103,10 @@
           ytCookieFileContent = "";
           return;
         }
-        const reader = new FileReader();
-        reader.onerror = () => setYtStatus("Could not read the cookie file.", true);
-        reader.onload = () => {
-          ytCookieFileContent = String(reader.result || "");
-          if (ytCookieFileContent) {
-            setYtStatus("Cookie file attached. It will be used for Preview and Download.", false, true);
-          }
-        };
-        reader.readAsText(file);
+        handleCookieFileUpload(file);
       });
+
+      ytCookieRemoveBtn.addEventListener("click", () => removeCookieFile());
 
       ytPreviewBtn.addEventListener("click", async () => {
         clearYtOutput();
@@ -1316,6 +1431,7 @@
       });
 
       loadYtOptions();
+      refreshCookieStatus();
       checkForUpdate(true);
     </script>
   </body>
