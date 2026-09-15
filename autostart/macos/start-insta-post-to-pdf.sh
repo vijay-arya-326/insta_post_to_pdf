@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Ensure Homebrew and standard macOS paths are in PATH.
+# launchd launches processes with a minimal PATH that excludes /opt/homebrew/bin,
+# which means ffmpeg (and uv) may not be found even when installed via Homebrew.
+export PATH="/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:${PATH:-}"
+
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$ROOT"
 
