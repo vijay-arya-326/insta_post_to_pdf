@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import logging
 import re
 import shutil
 import subprocess
 import tempfile
 import time
+from logging.handlers import TimedRotatingFileHandler
 from pathlib import Path
 from threading import Lock
 from typing import Any, Literal
@@ -33,6 +35,42 @@ ROOT = Path(__file__).resolve().parent
 STATIC = ROOT / "static"
 CACHE_TTL_SECONDS = 10 * 60
 CACHE_VERSION = "orig-v3"
+
+LOGS_DIR = ROOT / "logs"
+LOG_FILE = LOGS_DIR / "app.log"
+LOG_RETENTION_DAYS = 5
+
+def _setup_logging() -> None:
+    LOGS_DIR.mkdir(parents=True, exist_ok=True)
+    formatter = logging.Formatter(
+        "%(asctime)s %(levelname)-7s %(name)s: %(message)s", datefmt="%Y-%m-%d %H:%M:%S"
+    )
+    file_handler = TimedRotatingFileHandler(
+        LOG_FILE,
+        when="midnight",
+        interval=1,
+        backupCount=LOG_RETENTION_DAYS,
+        encoding="utf-8",
+    )
+    file_handler.suffix = "%Y-%m-%d"
+    file_handler.namer = lambda name: name.replace(".log.", ".") + ".log"
+    file_handler.setFormatter(formatter)
+
+    root = logging.getLogger()
+    for handler in list(root.handlers):
+        root.removeHandler(handler)
+    root.setLevel(logging.INFO)
+    root.addHandler(file_handler)
+
+    # Also configure uvicorn loggers to use our handler
+    for name in ("uvicorn", "uvicorn.error", "uvicorn.access"):
+        logger = logging.getLogger(name)
+        logger.handlers.clear()
+        logger.propagate = True
+        logger.setLevel(logging.INFO)
+
+_setup_logging()
+log = logging.getLogger("app")
 
 app = FastAPI(title="Instagram post to PDF")
 _cache: dict[str, dict[str, Any]] = {}

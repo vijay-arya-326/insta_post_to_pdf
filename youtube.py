@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import platform
 import re
 import shutil
@@ -11,6 +12,8 @@ from urllib.parse import parse_qs, urlparse
 
 from yt_dlp import YoutubeDL
 from yt_dlp.utils import DownloadError, ExtractorError
+
+log = logging.getLogger("app")
 
 YOUTUBE_HOSTS = ("youtube.com", "youtu.be", "youtube-nocookie.com", "music.youtube.com")
 _JOBS: dict[str, dict] = {}
@@ -89,6 +92,50 @@ def ffmpeg_install_guide() -> dict[str, str | list[str]]:
             "Check with: ffmpeg -version",
         ],
     }
+
+
+def deno_install_guide() -> dict[str, str | list[str]]:
+    system = platform.system().lower()
+    if system == "windows":
+        return {
+            "os": "Windows",
+            "command": "winget install denoland.deno",
+            "steps": [
+                "Open PowerShell or Windows Terminal.",
+                "Run: winget install denoland.deno",
+                "If winget is unavailable, install from https://deno.land/#installation and add to PATH.",
+                "Close this app completely, then start it again so it picks up PATH.",
+                "Check with: deno --version",
+            ],
+        }
+    if system == "darwin":
+        return {
+            "os": "macOS",
+            "command": "brew install deno",
+            "steps": [
+                "Install Homebrew if needed: https://brew.sh",
+                "Run: brew install deno",
+                "Restart this app.",
+                "Check with: deno --version",
+            ],
+        }
+    return {
+        "os": "Linux",
+        "command": "curl -fsSL https://deno.land/install.sh | sh",
+        "steps": [
+            "Run: curl -fsSL https://deno.land/install.sh | sh",
+            "Add deno to PATH (usually ~/.deno/bin).",
+            "Restart this app.",
+            "Check with: deno --version",
+        ],
+    }
+
+
+def deno_missing_error() -> YoutubeError:
+    return YoutubeError(
+        "deno is required for YouTube signature decryption (JS challenge).",
+        install=deno_install_guide(),
+    )
 
 
 def set_job_progress(job_id: str, **fields: object) -> None:
@@ -210,7 +257,9 @@ def save_cookie_file(content: str) -> Path | None:
     if len(content) > 2_000_000:
         raise YoutubeError("Cookie file is too large.")
     UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
-    UPLOADED_COOKIE_FILE.write_text(content, encoding="utf-8")
+    # Normalize line endings to LF for yt-dlp compatibility on Windows
+    content = content.replace("\r\n", "\n").replace("\r", "\n")
+    UPLOADED_COOKIE_FILE.write_text(content, encoding="utf-8", newline="\n")
     return UPLOADED_COOKIE_FILE
 
 
@@ -435,6 +484,8 @@ def _download_sync(
 ) -> tuple[dict, Path]:
     if kind in VIDEO_KINDS | AUDIO_KINDS and not shutil.which("ffmpeg"):
         raise ffmpeg_missing_error()
+    if not shutil.which("deno"):
+        raise deno_missing_error()
 
     dest_dir.mkdir(parents=True, exist_ok=True)
     outtmpl = str(dest_dir / "%(id)s.%(ext)s")
@@ -588,6 +639,7 @@ async def preview_video(
     cookies_browser = normalize_cookie_browser(cookies_browser)
     playlist_id = playlist_id_from_url(url)
     extract_url = playlist_page_url(playlist_id) if playlist_id else url
+    log.info("Starting preview: url=%s browser=%s has_cookie_file=%s", url, cookies_browser, bool(cookies_file))
     try:
         info = await asyncio.to_thread(
             _extract_sync,
@@ -607,6 +659,7 @@ async def preview_video(
                 cookies_file=cookies_file,
             )
     except (DownloadError, ExtractorError) as exc:
+        log.exception("Preview failed (yt-dlp error): url=%s error=%s", url, exc)
         if extract_url != url:
             try:
                 info = await asyncio.to_thread(
@@ -622,14 +675,19 @@ async def preview_video(
         else:
             raise _from_ydl_error(exc, cookies_browser) from exc
     except YoutubeError:
+        log.warning("Preview failed (YoutubeError): url=%s", url)
         raise
     except Exception as exc:
+        log.exception("Preview failed (unexpected error): url=%s error=%s", url, exc)
         if _needs_youtube_cookies(str(exc).lower()):
             raise cookies_needed_error(cookies_browser) from exc
         raise YoutubeError("Could not load that YouTube video.") from exc
     if not info:
+        log.warning("Preview returned no info: url=%s", url)
         raise YoutubeError("Could not load that YouTube video.")
-    return _info_from_raw(info)
+    result = _info_from_raw(info)
+    log.info("Preview completed: url=%s title=%s entries=%d", url, result.title, len(result.entries))
+    return result
 
 
 async def download_video(
@@ -653,6 +711,8 @@ async def download_video(
         raise YoutubeError("Unknown video quality.")
     if audio_quality not in allowed_audio:
         raise YoutubeError("Unknown audio quality.")
+    log.info("Starting download: url=%s kind=%s quality=%s browser=%s has_cookie_file=%s",
+             url, kind, video_quality, cookies_browser, bool(cookies_file))
     try:
         info, path = await asyncio.to_thread(
             _download_sync,
@@ -666,11 +726,15 @@ async def download_video(
             cookies_file,
         )
         meta = _info_from_raw(info)
+        log.info("Download completed: url=%s path=%s", url, path)
     except YoutubeError:
+        log.warning("Download failed (YoutubeError): url=%s", url)
         raise
     except (DownloadError, ExtractorError) as exc:
+        log.exception("Download failed (yt-dlp error): url=%s error=%s", url, exc)
         raise _from_ydl_error(exc, cookies_browser) from exc
     except Exception as exc:
+        log.exception("Download failed (unexpected error): url=%s error=%s", url, exc)
         if "ffmpeg" in str(exc).lower():
             raise ffmpeg_missing_error() from exc
         if _needs_youtube_cookies(str(exc).lower()):
@@ -689,7 +753,9 @@ async def download_video(
 
 
 def _from_ydl_error(exc: BaseException, cookies_browser: str = "") -> YoutubeError:
-    message = str(exc).lower()
+    raw = str(exc)
+    message = raw.lower()
+    log.warning("yt-dlp error converted: %s", raw[:500])
     if "ffmpeg" in message:
         return ffmpeg_missing_error()
     if _needs_youtube_cookies(message):
@@ -703,7 +769,8 @@ def _from_ydl_error(exc: BaseException, cookies_browser: str = "") -> YoutubeErr
             "No downloadable format was found for that video. "
             "It may be a live stream, a members-only video, or a region-restricted upload."
         )
-    return YoutubeError("Could not download that YouTube video.")
+    snippet = raw[:200].rstrip(".")
+    return YoutubeError(f"Could not download that YouTube video: {snippet}")
 
 
 _SAFE_NAME = re.compile(r"[\\/:*?\"<>|]+")
