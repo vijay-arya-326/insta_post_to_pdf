@@ -12,3 +12,10 @@
 2026-09-18 06:21:26 INFO    uvicorn.error: Started server process [11008]
 2026-09-18 06:21:26 INFO    uvicorn.error: Waiting for application startup.
 2026-09-18 06:21:26 INFO    uvicorn.error: Application startup complete.
+2026-09-18 06:35:21 INFO    uvicorn.error: Shutting down
+2026-09-18 06:35:22 INFO    uvicorn.error: Waiting for application shutdown.
+2026-09-18 06:35:22 INFO    uvicorn.error: Application shutdown complete.
+2026-09-18 06:35:22 INFO    uvicorn.error: Finished server process [11008]
+2026-09-18 06:35:23 INFO    uvicorn.error: Started server process [16976]
+2026-09-18 06:35:23 INFO    uvicorn.error: Waiting for application startup.
+2026-09-18 06:35:23 INFO    uvicorn.error: Application startup complete.
