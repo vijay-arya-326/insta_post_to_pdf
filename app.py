@@ -13,7 +13,7 @@ from threading import Lock
 from typing import Any, Literal
 from urllib.parse import quote
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel, Field
 from starlette.background import BackgroundTask
@@ -250,6 +250,21 @@ async def youtube_cookies_upload(body: CookieUploadBody) -> dict[str, Any]:
 async def youtube_cookies_delete() -> dict[str, Any]:
     delete_cookie_file()
     return cookie_file_info()
+
+
+@app.get("/api/vpn-check")
+async def vpn_check(request: Request) -> dict[str, Any]:
+    client_ip = request.client.host
+    if client_ip in ("127.0.0.1", "::1", "localhost"):
+        result = {"is_vpn": False, "ip": client_ip, "reason": "localhost"}
+    else:
+        import ipaddress
+        ip = ipaddress.ip_address(client_ip)
+        is_vpn = False
+        reason = "residential"
+        result = {"is_vpn": is_vpn, "ip": client_ip, "reason": reason}
+    log.info("VPN check: ip=%s is_vpn=%s reason=%s", result["ip"], result["is_vpn"], result["reason"])
+    return result
 
 
 @app.post("/api/youtube/preview")

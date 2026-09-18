@@ -226,7 +226,7 @@
       .cookie-upload-box .danger {
         margin-top: 4px;
       }
-      .vpn-alert {
+      .bot-alert {
         position: fixed;
         top: 0;
         left: 0;
@@ -247,36 +247,33 @@
         from { transform: translateY(-100%); opacity: 0; }
         to { transform: translateY(0); opacity: 1; }
       }
-      .vpn-alert-icon {
+      .bot-alert-icon {
         font-size: 1.2rem;
         flex-shrink: 0;
       }
-      .vpn-alert-text {
+      .bot-alert-text {
         flex: 1;
         line-height: 1.5;
       }
-      .vpn-alert-text a {
-        color: #a0522d;
-        font-weight: 600;
-        text-decoration: underline;
-      }
-      .vpn-alert-close {
+      .bot-alert-close,
+      .bot-alert-action {
         background: transparent;
         border: 1px solid #e0a800;
         color: #5b3a0e;
         border-radius: 6px;
         padding: 4px 10px;
-        font-size: 1.1rem;
+        font-size: 0.85rem;
         line-height: 1;
         cursor: pointer;
         flex-shrink: 0;
         transition: background 0.15s, border-color 0.15s;
       }
-      .vpn-alert-close:hover {
+      .bot-alert-close:hover,
+      .bot-alert-action:hover {
         background: #f0c36d;
         border-color: #d09800;
       }
-      .vpn-alert.hidden {
+      .bot-alert[hidden] {
         display: none;
       }
       button {
@@ -450,10 +447,10 @@
     </style>
   </head>
   <body>
-    <div class="vpn-alert" id="vpnAlert" role="alert" hidden>
-      <span class="vpn-alert-icon">⚠</span>
-      <span class="vpn-alert-text">Using a VPN or proxy? YouTube may block downloads from datacenter IPs. <a href="#" id="vpnAlertLearn">Learn more</a></span>
-      <button class="vpn-alert-close" id="vpnAlertClose" aria-label="Dismiss">×</button>
+    <div class="bot-alert" id="botAlert" role="alert" hidden>
+      <span class="bot-alert-icon">⚠</span>
+      <span class="bot-alert-text">YouTube blocked this download (bot detection). Check if VPN/proxy is enabled. <button class="bot-alert-action" id="botAlertDeleteCookies">Delete Cookies</button></span>
+      <button class="bot-alert-close" id="botAlertClose" aria-label="Dismiss">×</button>
     </div>
     <main>
       <div class="topbar">
@@ -679,21 +676,21 @@
       tabInstagram.addEventListener("click", () => selectTab("instagram"));
       tabYoutube.addEventListener("click", () => selectTab("youtube"));
 
-      // VPN Alert logic
-      const vpnAlert = document.getElementById("vpnAlert");
-      const vpnAlertClose = document.getElementById("vpnAlertClose");
-      const vpnAlertLearn = document.getElementById("vpnAlertLearn");
-      const vpnAlertDismissed = sessionStorage.getItem("vpnAlertDismissed") === "true";
+      // Bot detection alert - shown when download fails with bot error
+      const botAlert = document.getElementById("botAlert");
+      const botAlertClose = document.getElementById("botAlertClose");
+      const botAlertDeleteCookies = document.getElementById("botAlertDeleteCookies");
+      const botAlertDismissed = sessionStorage.getItem("botAlertDismissed") === "true";
 
-      function showVpnAlert(show) {
-        if (show && !vpnAlertDismissed) {
-          vpnAlert.hidden = false;
+      function showBotAlert(show) {
+        if (show && !botAlertDismissed) {
+          botAlert.hidden = false;
         } else {
-          vpnAlert.hidden = true;
+          botAlert.hidden = true;
         }
       }
 
-      function selectTab(name) {
+      async function selectTab(name) {
         const instagram = name === "instagram";
         tabInstagram.setAttribute("aria-selected", String(instagram));
         tabYoutube.setAttribute("aria-selected", String(!instagram));
@@ -701,17 +698,26 @@
         panelYoutube.hidden = instagram;
         lede.textContent = instagram ? INSTAGRAM_LEDE : YOUTUBE_LEDE;
         document.title = instagram ? "Insta Post to PDF" : "Youtube Videos";
-        showVpnAlert(!instagram); // Show VPN alert only on YouTube tab
+        showBotAlert(false);
       }
 
-      vpnAlertClose.addEventListener("click", () => {
-        sessionStorage.setItem("vpnAlertDismissed", "true");
-        showVpnAlert(false);
+      botAlertClose.addEventListener("click", () => {
+        sessionStorage.setItem("botAlertDismissed", "true");
+        showBotAlert(false);
       });
 
-      vpnAlertLearn.addEventListener("click", (e) => {
-        e.preventDefault();
-        alert("YouTube blocks downloads from VPN/datacenter IPs.\n\nFixes:\n• Disable VPN on Windows, use home ISP directly\n• Use residential proxy (not datacenter VPN)\n• Export fresh cookies from Chrome on Windows (not copied from macOS)\n• The same cookie file works on macOS because its IP is clean");
+      botAlertDeleteCookies.addEventListener("click", async () => {
+        try {
+          const res = await fetch("/api/youtube/cookies", { method: "DELETE" });
+          if (res.ok) {
+            alert("Cookies deleted. Please upload fresh cookies from Chrome on this machine.");
+            showBotAlert(false);
+          } else {
+            alert("Failed to delete cookies.");
+          }
+        } catch {
+          alert("Failed to delete cookies.");
+        }
       });
 
       function setBusy(busy) {
@@ -1381,6 +1387,10 @@
                 }
                 failed.push({ title: entry.title, error: err.message || "Unknown error" });
                 setYtStatus(`Step ${i + 1} of ${entries.length}: failed — ${entry.title}`, true);
+                const msg = (err.message || "").toLowerCase();
+                if (msg.includes("bot") || msg.includes("not a bot")) {
+                  showBotAlert(true);
+                }
               }
             }
             showYtProgress(entries.length, entries.length, "Playlist complete", folder, "Done", 100);
@@ -1418,6 +1428,10 @@
         } catch (err) {
           setYtStatus(err.message, true);
           if (err.install) showFfmpegInstall(err.install, err.message);
+          const msg = (err.message || "").toLowerCase();
+          if (msg.includes("bot") || msg.includes("not a bot")) {
+            showBotAlert(true);
+          }
         } finally {
           setYtBusy(false);
         }

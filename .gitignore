@@ -4,4 +4,7 @@ __pycache__/
 .DS_Store
 .env
 .idea/
+uploads/
+logs/
+*.log
 .jbeval
