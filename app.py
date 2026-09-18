@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import platform
 import re
 import shutil
 import subprocess
@@ -68,6 +69,11 @@ def _setup_logging() -> None:
         logger.handlers.clear()
         logger.propagate = True
         logger.setLevel(logging.INFO)
+
+    # Log system info at startup
+    log = logging.getLogger("app")
+    log.info("System: %s %s (%s) Python: %s", platform.system(), platform.release(), platform.machine(), platform.python_version())
+    log.info("Architecture: %s, Processor: %s", platform.architecture()[0], platform.processor())
 
 _setup_logging()
 log = logging.getLogger("app")
