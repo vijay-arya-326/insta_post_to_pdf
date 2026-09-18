@@ -468,8 +468,12 @@ def _extract_sync(
     }
     if extract_flat:
         opts["extract_flat"] = True
+    log.info("Preview extract: url=%s allow_playlist=%s extract_flat=%s cookies_browser=%s has_cookie_file=%s",
+             url, allow_playlist, extract_flat, cookies_browser, bool(saved))
     with YoutubeDL(opts) as ydl:
-        return ydl.extract_info(url, download=False)
+        result = ydl.extract_info(url, download=False)
+        log.info("Preview extract done: type=%s id=%s", result.get("_type"), result.get("id") or result.get("title", "?"))
+        return result
 
 
 def _download_sync(
@@ -523,6 +527,8 @@ def _download_sync_with_opts(
         "no_color": True,
         **_cookie_opts(cookies_browser, cookies_file),
     }
+    log.info("Download opts: kind=%s quality=%s format=%s cookies_browser=%s has_cookie_file=%s",
+             kind, video_quality, opts["format"], cookies_browser, bool(cookies_file))
     if job_id:
         set_job_progress(job_id, phase="starting", label="Starting download")
         opts["progress_hooks"] = [_progress_hook(job_id)]
@@ -531,6 +537,7 @@ def _download_sync_with_opts(
         opts["merge_output_format"] = kind
         opts["final_ext"] = kind
         opts["postprocessors"] = [{"key": "FFmpegVideoRemuxer", "preferedformat": kind}]
+        log.info("Video download: will merge to %s via ffmpeg", kind)
     else:
         opts["postprocessors"] = [
             {
@@ -539,11 +546,14 @@ def _download_sync_with_opts(
                 "preferredquality": audio_quality,
             }
         ]
+        log.info("Audio download: will extract to mp3 %s kbps via ffmpeg", audio_quality)
 
+    log.info("Starting yt-dlp extract_info for %s", url)
     with YoutubeDL(opts) as ydl:
         info = ydl.extract_info(url, download=True)
         if not info:
             raise YoutubeError("Could not download that video.")
+        log.info("yt-dlp finished, info id=%s title=%s", info.get("id"), info.get("title"))
         prepared = ydl.prepare_filename(info)
         video_id = str(info.get("id") or "")
         expected_ext = _kind_ext(kind)
@@ -554,11 +564,14 @@ def _download_sync_with_opts(
         ]
         for path in candidates:
             if path.exists() and path.is_file():
+                log.info("Found output file: %s (%.1f MB)", path, path.stat().st_size / 1024 / 1024)
                 return info, path
         matches = sorted(dest_dir.glob(f"{video_id}.*")) if video_id else list(dest_dir.iterdir())
         files = [p for p in matches if p.is_file()]
         if not files:
+            log.error("No output file found in %s for video_id=%s", dest_dir, video_id)
             raise YoutubeError("Download finished but the file was not found.")
+        log.info("Found output file (fallback): %s", files[0])
         return info, files[0]
 
 
