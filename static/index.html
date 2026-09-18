@@ -226,6 +226,59 @@
       .cookie-upload-box .danger {
         margin-top: 4px;
       }
+      .vpn-alert {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        z-index: 1000;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 12px 16px;
+        background: linear-gradient(90deg, #fff3cd 0%, #ffe69c 100%);
+        border-bottom: 1px solid #f0c36d;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+        font-size: 0.88rem;
+        color: #5b3a0e;
+        animation: slideDown 0.3s ease-out;
+      }
+      @keyframes slideDown {
+        from { transform: translateY(-100%); opacity: 0; }
+        to { transform: translateY(0); opacity: 1; }
+      }
+      .vpn-alert-icon {
+        font-size: 1.2rem;
+        flex-shrink: 0;
+      }
+      .vpn-alert-text {
+        flex: 1;
+        line-height: 1.5;
+      }
+      .vpn-alert-text a {
+        color: #a0522d;
+        font-weight: 600;
+        text-decoration: underline;
+      }
+      .vpn-alert-close {
+        background: transparent;
+        border: 1px solid #e0a800;
+        color: #5b3a0e;
+        border-radius: 6px;
+        padding: 4px 10px;
+        font-size: 1.1rem;
+        line-height: 1;
+        cursor: pointer;
+        flex-shrink: 0;
+        transition: background 0.15s, border-color 0.15s;
+      }
+      .vpn-alert-close:hover {
+        background: #f0c36d;
+        border-color: #d09800;
+      }
+      .vpn-alert.hidden {
+        display: none;
+      }
       button {
         border: 0;
         border-radius: 10px;
@@ -397,6 +450,11 @@
     </style>
   </head>
   <body>
+    <div class="vpn-alert" id="vpnAlert" role="alert" hidden>
+      <span class="vpn-alert-icon">⚠</span>
+      <span class="vpn-alert-text">Using a VPN or proxy? YouTube may block downloads from datacenter IPs. <a href="#" id="vpnAlertLearn">Learn more</a></span>
+      <button class="vpn-alert-close" id="vpnAlertClose" aria-label="Dismiss">×</button>
+    </div>
     <main>
       <div class="topbar">
         <h1>Insta Post to PDF</h1>
@@ -620,6 +678,41 @@
 
       tabInstagram.addEventListener("click", () => selectTab("instagram"));
       tabYoutube.addEventListener("click", () => selectTab("youtube"));
+
+      // VPN Alert logic
+      const vpnAlert = document.getElementById("vpnAlert");
+      const vpnAlertClose = document.getElementById("vpnAlertClose");
+      const vpnAlertLearn = document.getElementById("vpnAlertLearn");
+      const vpnAlertDismissed = sessionStorage.getItem("vpnAlertDismissed") === "true";
+
+      function showVpnAlert(show) {
+        if (show && !vpnAlertDismissed) {
+          vpnAlert.hidden = false;
+        } else {
+          vpnAlert.hidden = true;
+        }
+      }
+
+      function selectTab(name) {
+        const instagram = name === "instagram";
+        tabInstagram.setAttribute("aria-selected", String(instagram));
+        tabYoutube.setAttribute("aria-selected", String(!instagram));
+        panelInstagram.hidden = !instagram;
+        panelYoutube.hidden = instagram;
+        lede.textContent = instagram ? INSTAGRAM_LEDE : YOUTUBE_LEDE;
+        document.title = instagram ? "Insta Post to PDF" : "Youtube Videos";
+        showVpnAlert(!instagram); // Show VPN alert only on YouTube tab
+      }
+
+      vpnAlertClose.addEventListener("click", () => {
+        sessionStorage.setItem("vpnAlertDismissed", "true");
+        showVpnAlert(false);
+      });
+
+      vpnAlertLearn.addEventListener("click", (e) => {
+        e.preventDefault();
+        alert("YouTube blocks downloads from VPN/datacenter IPs.\n\nFixes:\n• Disable VPN on Windows, use home ISP directly\n• Use residential proxy (not datacenter VPN)\n• Export fresh cookies from Chrome on Windows (not copied from macOS)\n• The same cookie file works on macOS because its IP is clean");
+      });
 
       function setBusy(busy) {
         previewBtn.disabled = busy;
