@@ -533,3 +533,41 @@ Traceback (most recent call last):
 yt_dlp.utils.DownloadError: ERROR: [youtube] sGmhziz9MoE: Sign in to confirm you’re not a bot. Use --cookies-from-browser or --cookies for the authentication. See  https://github.com/yt-dlp/yt-dlp/wiki/FAQ#how-do-i-pass-cookies-to-yt-dlp  for how to manually pass cookies. Also see  https://github.com/yt-dlp/yt-dlp/wiki/Extractors#exporting-youtube-cookies  for tips on effectively exporting YouTube cookies
 2026-09-17 23:59:06 WARNING app: yt-dlp error converted: ERROR: [youtube] sGmhziz9MoE: Sign in to confirm you’re not a bot. Use --cookies-from-browser or --cookies for the authentication. See  https://github.com/yt-dlp/yt-dlp/wiki/FAQ#how-do-i-pass-cookies-to-yt-dlp  for how to manually pass cookies. Also see  https://github.com/yt-dlp/yt-dlp/wiki/Extractors#exporting-youtube-cookies  for tips on effectively exporting YouTube cookies
 2026-09-17 23:59:06 INFO    uvicorn.access: 127.0.0.1:63135 - "POST /api/youtube/download HTTP/1.1" 400
+2026-09-18 06:27:46 INFO    uvicorn.error: Started server process [705]
+2026-09-18 06:27:46 INFO    uvicorn.error: Waiting for application startup.
+2026-09-18 06:27:46 INFO    uvicorn.error: Application startup complete.
+2026-09-18 06:27:46 INFO    uvicorn.error: Uvicorn running on http://127.0.0.1:8585 (Press CTRL+C to quit)
+2026-09-18 06:27:52 INFO    uvicorn.access: 127.0.0.1:49732 - "GET / HTTP/1.1" 200
+2026-09-18 06:27:52 INFO    uvicorn.access: 127.0.0.1:49732 - "GET /api/youtube/options HTTP/1.1" 200
+2026-09-18 06:27:52 INFO    uvicorn.access: 127.0.0.1:49733 - "GET /api/youtube/cookies HTTP/1.1" 200
+2026-09-18 06:27:53 INFO    uvicorn.access: 127.0.0.1:49735 - "GET /api/update/check HTTP/1.1" 200
+2026-09-18 06:27:53 INFO    uvicorn.access: 127.0.0.1:49733 - "GET /favicon.ico HTTP/1.1" 404
+2026-09-18 06:27:54 INFO    uvicorn.access: 127.0.0.1:49733 - "GET / HTTP/1.1" 200
+2026-09-18 06:27:55 INFO    uvicorn.access: 127.0.0.1:49733 - "GET /api/youtube/options HTTP/1.1" 200
+2026-09-18 06:27:55 INFO    uvicorn.access: 127.0.0.1:49735 - "GET /api/youtube/cookies HTTP/1.1" 200
+2026-09-18 06:27:55 INFO    uvicorn.access: 127.0.0.1:49732 - "GET /api/update/check HTTP/1.1" 200
+2026-09-18 06:27:55 INFO    uvicorn.access: 127.0.0.1:49735 - "GET / HTTP/1.1" 200
+2026-09-18 06:27:55 INFO    uvicorn.access: 127.0.0.1:49735 - "GET /api/youtube/options HTTP/1.1" 200
+2026-09-18 06:27:55 INFO    uvicorn.access: 127.0.0.1:49732 - "GET /api/youtube/cookies HTTP/1.1" 200
+2026-09-18 06:27:56 INFO    uvicorn.access: 127.0.0.1:49733 - "GET /api/update/check HTTP/1.1" 200
+2026-09-18 06:27:56 INFO    uvicorn.access: 127.0.0.1:49735 - "GET / HTTP/1.1" 200
+2026-09-18 06:27:56 INFO    uvicorn.access: 127.0.0.1:49735 - "GET /api/youtube/options HTTP/1.1" 200
+2026-09-18 06:27:56 INFO    uvicorn.access: 127.0.0.1:49733 - "GET /api/youtube/cookies HTTP/1.1" 200
+2026-09-18 06:27:57 INFO    uvicorn.access: 127.0.0.1:49732 - "GET /api/update/check HTTP/1.1" 200
+2026-09-18 06:27:57 INFO    uvicorn.access: 127.0.0.1:49735 - "GET / HTTP/1.1" 200
+2026-09-18 06:27:57 INFO    uvicorn.access: 127.0.0.1:49735 - "GET /api/youtube/options HTTP/1.1" 200
+2026-09-18 06:27:57 INFO    uvicorn.access: 127.0.0.1:49732 - "GET /api/youtube/cookies HTTP/1.1" 200
+2026-09-18 06:27:58 INFO    uvicorn.access: 127.0.0.1:49733 - "GET /api/update/check HTTP/1.1" 200
+2026-09-18 06:28:32 INFO    app: Starting preview: url=https://www.youtube.com/watch?v=5WLdXo80Lus browser= has_cookie_file=False
+2026-09-18 06:28:32 INFO    app: Preview extract: url=https://www.youtube.com/watch?v=5WLdXo80Lus allow_playlist=True extract_flat=True cookies_browser= has_cookie_file=False
+2026-09-18 06:28:35 INFO    app: Preview extract done: type=None id=5WLdXo80Lus
+2026-09-18 06:28:35 INFO    app: Preview completed: url=https://www.youtube.com/watch?v=5WLdXo80Lus title=The Terminal List Season 2 – Official Trailer | Prime Video India entries=1
+2026-09-18 06:28:35 INFO    uvicorn.access: 127.0.0.1:49752 - "POST /api/youtube/preview HTTP/1.1" 200
+2026-09-18 06:28:45 INFO    app: Starting download: url=https://www.youtube.com/watch?v=5WLdXo80Lus kind=mp4 quality=best browser= has_cookie_file=False
+2026-09-18 06:28:45 INFO    app: Download opts: kind=mp4 quality=best format=bestvideo+bestaudio/bestvideo*+bestaudio*/best cookies_browser= has_cookie_file=False
+2026-09-18 06:28:45 INFO    app: Video download: will merge to mp4 via ffmpeg
+2026-09-18 06:28:45 INFO    app: Starting yt-dlp extract_info for https://www.youtube.com/watch?v=5WLdXo80Lus
+2026-09-18 06:28:52 INFO    app: yt-dlp finished, info id=5WLdXo80Lus title=The Terminal List Season 2 – Official Trailer | Prime Video India
+2026-09-18 06:28:52 INFO    app: Found output file: /var/folders/ql/0mxmnxk51mdggqglpq9y884c0000gn/T/yt-dlp-zrepxzh9/5WLdXo80Lus.mp4 (11.7 MB)
+2026-09-18 06:28:52 INFO    app: Download completed: url=https://www.youtube.com/watch?v=5WLdXo80Lus path=/var/folders/ql/0mxmnxk51mdggqglpq9y884c0000gn/T/yt-dlp-zrepxzh9/5WLdXo80Lus.mp4
+2026-09-18 06:28:52 INFO    uvicorn.access: 127.0.0.1:49766 - "POST /api/youtube/download HTTP/1.1" 200
