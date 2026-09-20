@@ -1270,9 +1270,9 @@
 
       function playlistFileName(index, total, title, ext) {
         const pad = String(index).padStart(String(total).length, "0");
-        const named = titleToFilename(title, ext) || `video-${pad}.${ext}`;
+        const named = titleToFilename(title, ext) || `video-${pad}`;
         const stem = named.replace(/\.(mp4|webm|mp3)$/i, "");
-        return `${pad} - ${stem}.${ext}`;
+        return `download/${pad} - ${stem}`;
       }
 
       async function saveOneToLibrary(url, filename, format, playlistTitle, onProgress) {
@@ -1350,7 +1350,8 @@
         try {
           if (playlist) {
             const entries = ytLastPreview.entries;
-            const folder = ytLastPreview.library_folder || ytLastPreview.title;
+            // Folder name fixed as "download" - videos saved to project download folder
+    const folder = "download";
             let ok = 0;
             const failed = []; // { title, error }
             hideYtProgress();
@@ -1364,13 +1365,13 @@
                   entry.url,
                   playlistFileName(i + 1, entries.length, entry.title, ext),
                   format,
-                  ytLastPreview.title,
+                  "download",
                   (job) => {
                     showYtProgress(
                       i + 1,
                       entries.length,
                       entry.title,
-                      folder,
+                      "download",
                       job.label,
                       job.percent
                     );
@@ -1378,7 +1379,7 @@
                   }
                 );
                 ok += 1;
-                showYtProgress(i + 1, entries.length, entry.title, folder, "Saved", 100);
+                showYtProgress(i + 1, entries.length, entry.title, "download", "Saved", 100);
                 setYtStatus(`Step ${i + 1} of ${entries.length}: saved ${saved.filename}`);
               } catch (err) {
                 if (err.install) {
@@ -1393,7 +1394,7 @@
                 }
               }
             }
-            showYtProgress(entries.length, entries.length, "Playlist complete", folder, "Done", 100);
+            showYtProgress(entries.length, entries.length, "Playlist complete", "download", "Done", 100);
             if (failed.length) {
               // Build multi-row status: summary line + one red row per failure
               const rows = [

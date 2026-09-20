@@ -358,7 +358,7 @@ def available_options() -> dict:
         "video_quality": list(VIDEO_QUALITIES),
         "audio_quality": list(AUDIO_QUALITIES),
         "notes": [
-            "Playlists save into your Videos folder (Movies on macOS), in a folder named after the playlist. Each video finishes before the next starts.",
+            "Playlists save directly into the project download folder. Each video finishes before the next starts. Each video finishes before the next starts.",
             "MP4/WebM merge and MP3 conversion need ffmpeg on PATH.",
             "Best MP4 prefers mp4/m4a streams. Best WebM prefers webm/opus streams.",
             "YouTube may ask for a sign-in. Use YouTube cookies from the browser where you are logged in.",
@@ -807,14 +807,13 @@ def sanitize_folder_name(name: str) -> str:
 
 
 def user_videos_library() -> Path:
-    home = Path.home()
-    if platform.system() == "Darwin":
-        return home / "Movies"
-    return home / "Videos"
+    # Return project download folder instead of system videos folder
+    return Path(__file__).resolve().parent / "download"
 
 
 def playlist_library_dir(playlist_title: str, *, create: bool = False) -> Path:
-    dest = user_videos_library() / sanitize_folder_name(playlist_title)
+    # Use project download folder directly (no playlist name subfolder)
+    dest = user_videos_library().joinpath(sanitize_folder_name(playlist_title))
     if create:
         dest.mkdir(parents=True, exist_ok=True)
     return dest
