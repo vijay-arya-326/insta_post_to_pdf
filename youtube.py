@@ -358,7 +358,7 @@ def available_options() -> dict:
         "video_quality": list(VIDEO_QUALITIES),
         "audio_quality": list(AUDIO_QUALITIES),
         "notes": [
-            "Playlists save directly into the project download folder. Each video finishes before the next starts. Each video finishes before the next starts.",
+            "Playlist videos save into a folder named after the playlist inside the project download folder. Each video finishes before the next starts.",
             "MP4/WebM merge and MP3 conversion need ffmpeg on PATH.",
             "Best MP4 prefers mp4/m4a streams. Best WebM prefers webm/opus streams.",
             "YouTube may ask for a sign-in. Use YouTube cookies from the browser where you are logged in.",

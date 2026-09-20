@@ -1,19 +1,23 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 import platform
 import re
 import shutil
+import sqlite3
 import subprocess
 import tempfile
 import time
+import zipfile
+from contextlib import asynccontextmanager
 from logging.handlers import TimedRotatingFileHandler
 from pathlib import Path
 from threading import Lock
 from typing import Any, Literal
 from urllib.parse import quote
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel, Field
 from starlette.background import BackgroundTask
@@ -30,6 +34,7 @@ from youtube import (
     playlist_library_dir,
     preview_video,
     save_cookie_file,
+    user_videos_library,
 )
 
 ROOT = Path(__file__).resolve().parent
@@ -78,7 +83,210 @@ def _setup_logging() -> None:
 _setup_logging()
 log = logging.getLogger("app")
 
-app = FastAPI(title="Instagram post to PDF")
+DOWNLOAD_TTL_SECONDS = 2 * 24 * 60 * 60
+DOWNLOAD_CLEANUP_INTERVAL = 60 * 60
+SCHEDULED_DELETE_DELAY = 10 * 60
+DOWNLOAD_ALL_DELETE_DELAY = 30 * 60
+PENDING_DELETE_POLL_SECONDS = 15
+_PENDING_DELETES: dict[str, float] = {}
+_PENDING_LOCK = Lock()
+
+
+def _db() -> sqlite3.Connection:
+    conn = sqlite3.connect(user_videos_library().resolve() / ".pending-deletes.db")
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS pending_deletes (rel TEXT PRIMARY KEY, deadline REAL NOT NULL)"
+    )
+    return conn
+
+
+def _load_pending_from_db() -> None:
+    db = user_videos_library().resolve() / ".pending-deletes.db"
+    if not db.exists():
+        return
+    fresh: dict[str, float] = {}
+    try:
+        conn = sqlite3.connect(db)
+        try:
+            rows = conn.execute("SELECT rel, deadline FROM pending_deletes").fetchall()
+            for rel, deadline in rows:
+                try:
+                    path = _library_rel(rel)
+                except HTTPException:
+                    continue
+                if path.is_file():
+                    fresh[rel] = deadline
+                else:
+                    conn.execute("DELETE FROM pending_deletes WHERE rel = ?", (rel,))
+            conn.commit()
+        finally:
+            conn.close()
+    except Exception:
+        log.exception("Failed to load pending deletes from DB")
+        return
+    with _PENDING_LOCK:
+        _PENDING_DELETES.update(fresh)
+
+
+def _store_pending(rel: str, deadline: float) -> None:
+    try:
+        conn = _db()
+        try:
+            conn.execute(
+                "INSERT OR REPLACE INTO pending_deletes (rel, deadline) VALUES (?, ?)",
+                (rel, deadline),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+    except Exception:
+        log.exception("Failed to persist pending delete for %r", rel)
+
+
+def _remove_pending(rels: list[str]) -> None:
+    if not rels:
+        return
+    try:
+        conn = _db()
+        try:
+            conn.executemany(
+                "DELETE FROM pending_deletes WHERE rel = ?", [(r,) for r in rels]
+            )
+            conn.commit()
+        finally:
+            conn.close()
+    except Exception:
+        log.exception("Failed to remove pending deletes from DB")
+
+
+def _file_pending_remaining(rel: str) -> int | None:
+    with _PENDING_LOCK:
+        deadline = _PENDING_DELETES.get(rel)
+    if not deadline:
+        return None
+    return max(0, int(deadline - time.time()))
+
+
+def _prune_empty_folders(root: Path, start: Path) -> None:
+    root_r = root.resolve()
+    cur = start.resolve()
+    while cur != root_r and cur.is_relative_to(root_r):
+        try:
+            if cur.is_dir() and not any(cur.iterdir()):
+                cur.rmdir()
+            else:
+                break
+        except OSError:
+            break
+        cur = cur.parent
+
+
+def _process_pending_deletes(root: Path) -> list[str]:
+    now = time.time()
+    with _PENDING_LOCK:
+        due = [rel for rel, deadline in _PENDING_DELETES.items() if now >= deadline]
+        for rel in due:
+            _PENDING_DELETES.pop(rel, None)
+    _remove_pending(due)
+    removed: list[str] = []
+    for rel in due:
+        try:
+            path = _library_rel(rel)
+        except HTTPException:
+            continue
+        try:
+            if path.is_file():
+                path.unlink()
+                removed.append(rel)
+                _prune_empty_folders(root, path.parent)
+        except OSError:
+            continue
+    return removed
+
+
+def _remove_if_expired(root: Path, path: Path, now: float) -> bool:
+    try:
+        age = now - path.stat().st_mtime
+    except OSError:
+        return False
+    if age <= DOWNLOAD_TTL_SECONDS:
+        return False
+    try:
+        path.unlink()
+    except OSError:
+        return False
+    return True
+
+
+def _cleanup_expired(root: Path) -> list[str]:
+    now = time.time()
+    targets = []
+    for path in root.rglob("*"):
+        if not path.is_file() or path.name.startswith("."):
+            continue
+        if _remove_if_expired(root, path, now):
+            targets.append((path, path.parent))
+    removed = []
+    seen: set[Path] = set()
+    for path, parent in targets:
+        removed.append(str(path.relative_to(root)))
+        if parent not in seen:
+            seen.add(parent)
+            _prune_empty_folders(root, parent)
+    return removed
+
+
+async def _pending_delete_loop() -> None:
+    root = user_videos_library()
+    while True:
+        await asyncio.sleep(PENDING_DELETE_POLL_SECONDS)
+        try:
+            removed = await asyncio.to_thread(_process_pending_deletes, root)
+            if removed:
+                log.info("Scheduled delete removed %d files", len(removed))
+        except Exception:
+            log.exception("Scheduled delete loop failed")
+
+
+async def _cleanup_loop() -> None:
+    root = user_videos_library()
+    while True:
+        await asyncio.sleep(DOWNLOAD_CLEANUP_INTERVAL)
+        try:
+            removed = await asyncio.to_thread(_cleanup_expired, root)
+            if removed:
+                log.info("Auto-delete removed %d expired downloads", len(removed))
+        except Exception:
+            log.exception("Auto-delete cleanup failed")
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    root = user_videos_library()
+    try:
+        _load_pending_from_db()
+    except Exception:
+        log.exception("Startup pending-delete load failed")
+    try:
+        removed = await asyncio.to_thread(_cleanup_expired, root)
+        if removed:
+            log.info("Startup cleanup removed %d expired downloads", len(removed))
+    except Exception:
+        log.exception("Startup cleanup failed")
+    tasks = [asyncio.create_task(_cleanup_loop()), asyncio.create_task(_pending_delete_loop())]
+    try:
+        yield
+    finally:
+        for task in tasks:
+            task.cancel()
+        for task in tasks:
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+
+
+app = FastAPI(title="Instagram post to PDF", lifespan=lifespan)
 _cache: dict[str, dict[str, Any]] = {}
 _cache_lock = Lock()
 
@@ -362,6 +570,179 @@ async def youtube_save(body: YoutubeBody) -> dict[str, Any]:
 @app.get("/api/youtube/job/{job_id}")
 async def youtube_job(job_id: str) -> dict[str, Any]:
     return get_job_progress(job_id)
+
+
+def _file_meta(root: Path, path: Path) -> dict[str, Any]:
+    stat = path.stat()
+    rel = str(path.relative_to(root))
+    remaining = max(0, DOWNLOAD_TTL_SECONDS - (time.time() - stat.st_mtime))
+    return {
+        "name": path.name,
+        "relative": rel,
+        "size": stat.st_size,
+        "modified": stat.st_mtime,
+        "expires_in": remaining,
+        "deleting_in": _file_pending_remaining(rel),
+    }
+
+
+def _library_rel(rel: str) -> Path:
+    root = user_videos_library().resolve()
+    candidate = (root / rel).resolve()
+    if candidate != root and not candidate.is_relative_to(root):
+        raise HTTPException(status_code=400, detail="Invalid path.")
+    return candidate
+
+
+@app.get("/api/downloads")
+async def downloads_list() -> dict[str, Any]:
+    root = user_videos_library()
+    root.mkdir(parents=True, exist_ok=True)
+    await asyncio.to_thread(_cleanup_expired, root)
+    folders: list[dict[str, Any]] = []
+    files: list[dict[str, Any]] = []
+    for child in sorted(root.iterdir(), key=lambda p: p.name.lower()):
+        if child.name.startswith("."):
+            continue
+        if child.is_dir():
+            entries = sorted(
+                (p for p in child.iterdir() if p.is_file() and not p.name.startswith(".")),
+                key=lambda p: p.name.lower(),
+            )
+            meta = [_file_meta(root, p) for p in entries]
+            folders.append(
+                {
+                    "name": child.name,
+                    "relative": child.name,
+                    "count": len(meta),
+                    "size": sum(item["size"] for item in meta),
+                    "files": meta,
+                }
+            )
+        elif child.is_file():
+            files.append(_file_meta(root, child))
+    return {
+        "root": str(root),
+        "ttl_seconds": DOWNLOAD_TTL_SECONDS,
+        "folders": folders,
+        "files": files,
+    }
+
+
+@app.get("/api/downloads/file")
+async def downloads_file(rel: str = Query(...)) -> FileResponse:
+    root = user_videos_library().resolve()
+    path = _library_rel(rel)
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="File not found.")
+    ext = path.suffix.lower()
+    media_type = {
+        ".mp4": "video/mp4",
+        ".webm": "video/webm",
+        ".mp3": "audio/mpeg",
+        ".pdf": "application/pdf",
+    }.get(ext, "application/octet-stream")
+    return FileResponse(path, media_type=media_type, headers={"Content-Disposition": _disposition(path.name)})
+
+
+@app.delete("/api/downloads/file")
+async def downloads_delete(rel: str = Query(...)) -> dict[str, Any]:
+    root = user_videos_library().resolve()
+    path = _library_rel(rel)
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="File not found.")
+    path.unlink()
+    with _PENDING_LOCK:
+        _PENDING_DELETES.pop(rel, None)
+        _remove_pending([rel])
+    _prune_empty_folders(root, path.parent)
+    return {"ok": True, "deleted": str(path.relative_to(root))}
+
+
+@app.get("/api/downloads/folder/zip")
+async def downloads_folder_zip(rel: str = Query(...)) -> FileResponse:
+    root = user_videos_library().resolve()
+    folder = _library_rel(rel)
+    if not folder.is_dir():
+        raise HTTPException(status_code=404, detail="Folder not found.")
+    files = sorted(
+        (p for p in folder.iterdir() if p.is_file() and not p.name.startswith(".")),
+        key=lambda p: p.name.lower(),
+    )
+    if not files:
+        raise HTTPException(status_code=400, detail="That folder has no files.")
+    tmpdir = tempfile.mkdtemp(prefix="dl-zip-")
+    archive = Path(tmpdir) / f"{folder.name}.zip"
+
+    def build() -> None:
+        with zipfile.ZipFile(archive, "w", zipfile.ZIP_STORED) as zf:
+            for path in files:
+                zf.write(path, arcname=path.name)
+
+    await asyncio.to_thread(build)
+
+    def cleanup() -> None:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+
+    return FileResponse(
+        archive,
+        media_type="application/zip",
+        headers={"Content-Disposition": _disposition(archive.name)},
+        background=BackgroundTask(cleanup),
+    )
+
+
+class ScheduledDeleteBody(BaseModel):
+    rel: str = Field(min_length=1)
+
+
+@app.post("/api/downloads/schedule-delete")
+async def downloads_schedule_delete(body: ScheduledDeleteBody) -> dict[str, Any]:
+    path = _library_rel(body.rel)
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="File not found.")
+    delay = SCHEDULED_DELETE_DELAY
+    deadline = time.time() + delay
+    with _PENDING_LOCK:
+        if body.rel not in _PENDING_DELETES:
+            _PENDING_DELETES[body.rel] = deadline
+            _store_pending(body.rel, deadline)
+    return {"ok": True, "rel": body.rel, "deletes_at": deadline, "delay_seconds": delay}
+
+
+class ScheduledFolderDeleteBody(BaseModel):
+    rel: str = Field(min_length=1)
+
+
+@app.post("/api/downloads/folder/schedule-delete")
+async def downloads_folder_schedule_delete(body: ScheduledFolderDeleteBody) -> dict[str, Any]:
+    root = user_videos_library().resolve()
+    folder = _library_rel(body.rel)
+    if not folder.is_dir():
+        raise HTTPException(status_code=404, detail="Folder not found.")
+    files = sorted(
+        (p for p in folder.iterdir() if p.is_file() and not p.name.startswith(".")),
+        key=lambda p: p.name.lower(),
+    )
+    if not files:
+        raise HTTPException(status_code=400, detail="That folder has no files.")
+    fresh: list[tuple[str, float]] = []
+    deadline = time.time() + DOWNLOAD_ALL_DELETE_DELAY
+    with _PENDING_LOCK:
+        for path in files:
+            rel = str(path.relative_to(root))
+            if rel not in _PENDING_DELETES:
+                _PENDING_DELETES[rel] = deadline
+                fresh.append((rel, deadline))
+    for rel, deadline in fresh:
+        _store_pending(rel, deadline)
+    return {
+        "ok": True,
+        "count": len(files),
+        "fresh": len(fresh),
+        "deletes_at": deadline,
+        "delay_seconds": DOWNLOAD_ALL_DELETE_DELAY,
+    }
 
 
 def _run_git(args: list[str], timeout: int = 30) -> tuple[bool, str]:

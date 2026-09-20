@@ -28,6 +28,11 @@
           var(--bg);
         color: var(--text);
       }
+      #dlRefreshBtn {
+        background: #ffd966;
+        color: #3a2b00;
+        border-color: transparent;
+      }
       main {
         width: min(920px, calc(100% - 32px));
         margin: 48px auto 80px;
@@ -444,6 +449,119 @@
         color: #ff6b6b;
         font-size: 0.88rem;
       }
+      .dl-folder {
+        margin-top: 16px;
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        background: #0d1016;
+      }
+      .dl-folder-head {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 12px;
+        padding: 12px 14px;
+        border-bottom: 1px solid var(--line);
+        cursor: pointer;
+        user-select: none;
+      }
+      .dl-folder-title {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        min-width: 0;
+      }
+      .dl-chevron {
+        flex-shrink: 0;
+        color: var(--muted);
+        transition: color 0.15s;
+      }
+      .dl-folder-head:hover .dl-chevron {
+        color: var(--text);
+      }
+      .dl-folder-info {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        min-width: 0;
+      }
+      .dl-folder-head strong {
+        font-size: 0.95rem;
+      }
+      .dl-folder-head span {
+        font-size: 0.8rem;
+        color: var(--muted);
+        white-space: nowrap;
+      }
+      .dl-files {
+        padding: 8px 14px;
+      }
+      .dl-file {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 8px 0;
+        border-radius: 8px;
+        border-bottom: 1px solid var(--line);
+        padding-left: 12px;
+        padding-right: 12px;
+      }
+      .dl-file.dl-row-odd {
+        background: #333b4d;
+      }
+      .dl-file.dl-row-even {
+        background: #4d5870;
+      }
+      .dl-file:last-child {
+        border-bottom: 0;
+      }
+      .dl-info {
+        flex: 1;
+        min-width: 0;
+      }
+      .dl-name {
+        display: block;
+        font-size: 0.9rem;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .dl-meta {
+        display: block;
+        font-size: 0.75rem;
+        color: var(--muted);
+        margin-top: 2px;
+      }
+      .dl-act {
+        flex-shrink: 0;
+        padding: 8px 12px;
+        font-size: 0.82rem;
+      }
+      .dl-file--urgent {
+        border-radius: 8px;
+        padding-left: 12px;
+        padding-right: 12px;
+        animation: dl-blink 2s linear infinite;
+      }
+      @keyframes dl-blink {
+        0%,
+        49.9% {
+          background: rgba(255, 60, 60, 0.2);
+          border-color: #ff6b6b;
+          box-shadow: 0 0 8px rgba(255, 60, 60, 0.4);
+        }
+        50%,
+        100% {
+          background: rgba(255, 150, 0, 0.22);
+          border-color: #ff8c00;
+          box-shadow: 0 0 8px rgba(255, 150, 0, 0.4);
+        }
+      }
+      @media (max-width: 520px) {
+        .dl-file {
+          flex-wrap: wrap;
+        }
+      }
     </style>
   </head>
   <body>
@@ -468,6 +586,9 @@
         </button>
         <button type="button" role="tab" id="tab-youtube" aria-controls="panel-youtube" aria-selected="false">
           Youtube Videos
+        </button>
+        <button type="button" role="tab" id="tab-downloads" aria-controls="panel-downloads" aria-selected="false">
+          Downloads
         </button>
       </div>
 
@@ -576,7 +697,7 @@
             <input type="checkbox" id="ytPlaylist" checked />
             <span id="ytPlaylistLabel">Download all videos one by one</span>
           </label>
-          <p class="hint" id="ytPlaylistHint">Each file is saved into your Videos folder, in a folder named after the playlist. The next video starts only after the current one finishes.</p>
+          <p class="hint" id="ytPlaylistHint">Each file is saved into the project download folder, in a folder named after the playlist. The next video starts only after the current one finishes.</p>
         </div>
         <p class="hint" id="ytNotes"></p>
         <div class="row actions">
@@ -600,17 +721,30 @@
         <div class="meta" id="ytMeta" hidden></div>
         <div class="yt-preview" id="ytPreview" hidden></div>
       </div>
+
+      <div class="card" id="panel-downloads" role="tabpanel" aria-labelledby="tab-downloads" hidden>
+        <p class="hint" id="dlNote"></p>
+        <div class="row actions">
+          <button class="ghost" id="dlRefreshBtn" type="button">Refresh</button>
+        </div>
+        <p class="status" id="dlStatus"></p>
+        <div id="dlList"></div>
+      </div>
     </main>
     <script>
       const INSTAGRAM_LEDE =
         "Paste a public Instagram photo post. Every carousel slide (?img_index=1 through the last slide) becomes a page in a PDF. Image posts only — no login.";
       const YOUTUBE_LEDE =
         "Paste a YouTube link and download the best MP4 or WebM (video) or MP3 (audio) with yt-dlp. Playlists save one file at a time. ffmpeg is required to merge video and to convert audio.";
+      const DOWNLOADS_LEDE =
+        "Browse every file saved into the project download folder, grouped by playlist.";
 
       const tabInstagram = document.getElementById("tab-instagram");
       const tabYoutube = document.getElementById("tab-youtube");
+      const tabDownloads = document.getElementById("tab-downloads");
       const panelInstagram = document.getElementById("panel-instagram");
       const panelYoutube = document.getElementById("panel-youtube");
+      const panelDownloads = document.getElementById("panel-downloads");
       const lede = document.getElementById("lede");
       const urlInput = document.getElementById("url");
       const filenameInput = document.getElementById("filename");
@@ -659,6 +793,10 @@
       const ytProgress = document.getElementById("ytProgress");
       const ytProgressFill = document.getElementById("ytProgressFill");
       const ytProgressLabel = document.getElementById("ytProgressLabel");
+      const dlStatus = document.getElementById("dlStatus");
+      const dlList = document.getElementById("dlList");
+      const dlRefreshBtn = document.getElementById("dlRefreshBtn");
+      const dlNote = document.getElementById("dlNote");
       let ytOptions = null;
       let ytLastPreview = null;
       let igReady = false;
@@ -675,6 +813,7 @@
 
       tabInstagram.addEventListener("click", () => selectTab("instagram"));
       tabYoutube.addEventListener("click", () => selectTab("youtube"));
+      tabDownloads.addEventListener("click", () => selectTab("downloads"));
 
       // Bot detection alert - shown when download fails with bot error
       const botAlert = document.getElementById("botAlert");
@@ -692,13 +831,17 @@
 
       async function selectTab(name) {
         const instagram = name === "instagram";
+        const downloads = name === "downloads";
         tabInstagram.setAttribute("aria-selected", String(instagram));
-        tabYoutube.setAttribute("aria-selected", String(!instagram));
+        tabYoutube.setAttribute("aria-selected", String(!instagram && !downloads));
+        tabDownloads.setAttribute("aria-selected", String(downloads));
         panelInstagram.hidden = !instagram;
-        panelYoutube.hidden = instagram;
-        lede.textContent = instagram ? INSTAGRAM_LEDE : YOUTUBE_LEDE;
-        document.title = instagram ? "Insta Post to PDF" : "Youtube Videos";
+        panelYoutube.hidden = instagram || downloads;
+        panelDownloads.hidden = !downloads;
+        lede.textContent = instagram ? INSTAGRAM_LEDE : downloads ? DOWNLOADS_LEDE : YOUTUBE_LEDE;
+        document.title = instagram ? "Insta Post to PDF" : downloads ? "Downloads" : "Youtube Videos";
         showBotAlert(false);
+        if (downloads) loadDownloads();
       }
 
       botAlertClose.addEventListener("click", () => {
@@ -1250,7 +1393,7 @@
               `<div class="yt-preview-body">${escapeHtml(data.title)}</div>` +
               `<div class="playlist">${items}</div>`;
             fillFilenameFromTitle(ytFilename, data.title, ytExt());
-            setYtStatus("Preview ready. Playlist videos save into your Videos/Movies folder. Uncheck to download only the first video in the browser.");
+            setYtStatus("Preview ready. Playlist videos save into the project download folder, under a folder named after the playlist. Uncheck to download only the first video in the browser.");
           } else {
             ytMeta.textContent = [data.title, data.uploader, duration].filter(Boolean).join(" · ");
             if (data.thumbnail) {
@@ -1272,7 +1415,7 @@
         const pad = String(index).padStart(String(total).length, "0");
         const named = titleToFilename(title, ext) || `video-${pad}`;
         const stem = named.replace(/\.(mp4|webm|mp3)$/i, "");
-        return `download/${pad} - ${stem}`;
+        return `${pad} - ${stem}`;
       }
 
       async function saveOneToLibrary(url, filename, format, playlistTitle, onProgress) {
@@ -1350,8 +1493,7 @@
         try {
           if (playlist) {
             const entries = ytLastPreview.entries;
-            // Folder name fixed as "download" - videos saved to project download folder
-    const folder = "download";
+            const folder = ytLastPreview.title || "YouTube playlist";
             let ok = 0;
             const failed = []; // { title, error }
             hideYtProgress();
@@ -1365,13 +1507,13 @@
                   entry.url,
                   playlistFileName(i + 1, entries.length, entry.title, ext),
                   format,
-                  "download",
+                  folder,
                   (job) => {
                     showYtProgress(
                       i + 1,
                       entries.length,
                       entry.title,
-                      "download",
+                      folder,
                       job.label,
                       job.percent
                     );
@@ -1379,7 +1521,7 @@
                   }
                 );
                 ok += 1;
-                showYtProgress(i + 1, entries.length, entry.title, "download", "Saved", 100);
+                showYtProgress(i + 1, entries.length, entry.title, folder, "Saved", 100);
                 setYtStatus(`Step ${i + 1} of ${entries.length}: saved ${saved.filename}`);
               } catch (err) {
                 if (err.install) {
@@ -1394,7 +1536,7 @@
                 }
               }
             }
-            showYtProgress(entries.length, entries.length, "Playlist complete", "download", "Done", 100);
+            showYtProgress(entries.length, entries.length, "Playlist complete", folder, "Done", 100);
             if (failed.length) {
               // Build multi-row status: summary line + one red row per failure
               const rows = [
@@ -1461,6 +1603,300 @@
         ytDownloadBtn.title = "Preview first";
         ytDownloadBtn.classList.remove("active");
       });
+
+      function formatBytes(n) {
+        if (!n && n !== 0) return "";
+        const units = ["B", "KB", "MB", "GB"];
+        let i = 0;
+        let v = n;
+        while (v >= 1024 && i < units.length - 1) {
+          v /= 1024;
+          i += 1;
+        }
+        return `${v.toFixed(v >= 100 || i === 0 ? 0 : 1)} ${units[i]}`;
+      }
+
+      function formatDate(ts) {
+        if (!ts) return "";
+        const d = new Date(ts * 1000);
+        return d.toLocaleString();
+      }
+
+      function formatExpiry(seconds) {
+        const total = Math.max(0, Math.floor(seconds || 0));
+        if (!total) return "0s";
+        const d = Math.floor(total / 86400);
+        const h = Math.floor((total % 86400) / 3600);
+        const m = Math.floor((total % 3600) / 60);
+        const s = total % 60;
+        const parts = [];
+        if (d) parts.push(`${d}d`);
+        if (h) parts.push(`${h}h`);
+        if (m) parts.push(`${m}m`);
+        parts.push(`${s}s`);
+        return parts.join(" ");
+      }
+
+      function metaLine(file, remaining) {
+        return `${formatBytes(file.size)} · ${formatDate(file.modified)} · deletes in ${formatExpiry(remaining)}`;
+      }
+
+      function setDlStatus(message, isError = false) {
+        dlStatus.textContent = message;
+        dlStatus.classList.toggle("error", isError);
+      }
+
+      function dlFileButton(label, className, onClick) {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = className;
+        btn.textContent = label;
+        btn.addEventListener("click", onClick);
+        return btn;
+      }
+
+      async function saveAndDeleteFile(file) {
+        try {
+          const res = await fetch(`/api/downloads/file?rel=${encodeURIComponent(file.relative)}`);
+          if (!res.ok) await readError(res);
+          const blob = await res.blob();
+          triggerDownload(blob, file.name);
+          const sched = await fetch("/api/downloads/schedule-delete", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ rel: file.relative }),
+          });
+          if (!sched.ok) await readError(sched);
+          setDlStatus(`${file.name} saved. Deleting from the library in 10 minutes.`);
+          loadDownloads();
+        } catch (err) {
+          setDlStatus(err.message, true);
+        }
+      }
+
+      function renderDownloads(data) {
+        dlList.innerHTML = "";
+        const folders = (data.folders || []).filter((f) => f.count > 0);
+        const files = data.files || [];
+        if (!folders.length && !files.length) {
+          setDlStatus("No downloads yet. Saved YouTube videos will show up here.");
+          return;
+        }
+        setDlStatus("");
+        for (const folder of folders) {
+          const card = document.createElement("div");
+          card.className = "dl-folder";
+          const head = document.createElement("div");
+          head.className = "dl-folder-head";
+          const chevron = document.createElement("span");
+          chevron.className = "dl-chevron";
+          chevron.textContent = "▾";
+          const title = document.createElement("div");
+          title.className = "dl-folder-title";
+          const headInfo = document.createElement("div");
+          headInfo.className = "dl-folder-info";
+          const name = document.createElement("strong");
+          name.textContent = folder.name;
+          const meta = document.createElement("span");
+          meta.textContent = `${folder.count} file${folder.count === 1 ? "" : "s"} · ${formatBytes(folder.size)}`;
+          headInfo.appendChild(name);
+          headInfo.appendChild(meta);
+          title.appendChild(chevron);
+          title.appendChild(headInfo);
+          head.appendChild(title);
+          head.appendChild(
+            dlFileButton("Download all", "active dl-act", async () => {
+              if (!confirm(`Download ${folder.name} as a zip and delete its files from the library in 30 minutes?`)) return;
+              try {
+                const res = await fetch(`/api/downloads/folder/zip?rel=${encodeURIComponent(folder.relative)}`);
+                if (!res.ok) await readError(res);
+                const blob = await res.blob();
+                triggerDownload(blob, `${folder.name}.zip`);
+                await fetch("/api/downloads/folder/schedule-delete", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ rel: folder.relative }),
+                });
+                setDlStatus(`${folder.name}.zip downloaded. ${folder.count} files will be deleted in 30 minutes.`);
+                loadDownloads();
+              } catch (err) {
+                setDlStatus(err.message, true);
+              }
+            })
+          );
+          card.appendChild(head);
+          const listEl = document.createElement("div");
+          listEl.className = "dl-files";
+          const folderOpen = openedFolders.has(folder.relative);
+          if (!folderOpen) {
+            listEl.style.display = "none";
+            chevron.textContent = "▸";
+          }
+          head.addEventListener("click", (e) => {
+            if (e.target.closest(".dl-act")) return;
+            if (openedFolders.has(folder.relative)) {
+              openedFolders.delete(folder.relative);
+              listEl.style.display = "none";
+              chevron.textContent = "▸";
+            } else {
+              openedFolders.add(folder.relative);
+              listEl.style.display = "";
+              chevron.textContent = "▾";
+            }
+          });
+          for (const file of folder.files) {
+            const row = document.createElement("div");
+            row.className = "dl-file";
+            const countdown = file.deleting_in != null ? file.deleting_in : file.expires_in;
+            if (typeof countdown === "number" && countdown <= 5 * 60) row.classList.add("dl-file--urgent");
+            row.classList.add(folder.files.indexOf(file) % 2 ? "dl-row-even" : "dl-row-odd");
+            const info = document.createElement("div");
+            info.className = "dl-info";
+            const fname = document.createElement("span");
+            fname.className = "dl-name";
+            fname.textContent = file.name;
+            const fmeta = document.createElement("span");
+            fmeta.className = "dl-meta";
+            const deleteAt = file.deleting_in != null ? file.deleting_in : file.expires_in;
+            fmeta.dataset.base = `${formatBytes(file.size)} · ${formatDate(file.modified)} · deletes in `;
+            fmeta.dataset.expires = String(deleteAt);
+            fmeta.textContent = metaLine(file, deleteAt);
+            info.appendChild(fname);
+            info.appendChild(fmeta);
+            row.appendChild(info);
+            row.appendChild(
+              dlFileButton("Save", "active dl-act", async () => {
+                try {
+                  const res = await fetch(`/api/downloads/file?rel=${encodeURIComponent(file.relative)}`);
+                  if (!res.ok) await readError(res);
+                  const blob = await res.blob();
+                  triggerDownload(blob, file.name);
+                } catch (err) {
+                  setDlStatus(err.message, true);
+                }
+              })
+            );
+            row.appendChild(
+              dlFileButton("Save and delete file", "danger dl-act", async () => {
+                await saveAndDeleteFile(file);
+              })
+            );
+            listEl.appendChild(row);
+          }
+          card.appendChild(listEl);
+          dlList.appendChild(card);
+        }
+        for (const file of files) {
+          const row = document.createElement("div");
+          row.className = "dl-file";
+          const countdown = file.deleting_in != null ? file.deleting_in : file.expires_in;
+          if (typeof countdown === "number" && countdown <= 5 * 60) row.classList.add("dl-file--urgent");
+          row.classList.add(files.indexOf(file) % 2 ? "dl-row-even" : "dl-row-odd");
+          const info = document.createElement("div");
+          info.className = "dl-info";
+          const fname = document.createElement("span");
+          fname.className = "dl-name";
+          fname.textContent = file.name;
+          const fmeta = document.createElement("span");
+          fmeta.className = "dl-meta";
+          const deleteAt = file.deleting_in != null ? file.deleting_in : file.expires_in;
+          fmeta.dataset.base = `${formatBytes(file.size)} · ${formatDate(file.modified)} · deletes in `;
+          fmeta.dataset.expires = String(deleteAt);
+          fmeta.textContent = metaLine(file, deleteAt);
+          info.appendChild(fname);
+          info.appendChild(fmeta);
+          row.appendChild(info);
+          row.appendChild(
+            dlFileButton("Save", "active dl-act", async () => {
+              try {
+                const res = await fetch(`/api/downloads/file?rel=${encodeURIComponent(file.relative)}`);
+                if (!res.ok) await readError(res);
+                const blob = await res.blob();
+                triggerDownload(blob, file.name);
+              } catch (err) {
+                setDlStatus(err.message, true);
+              }
+            })
+          );
+          row.appendChild(
+            dlFileButton("Save and delete file", "danger dl-act", async () => {
+              await saveAndDeleteFile(file);
+            })
+          );
+          dlList.appendChild(row);
+        }
+      }
+
+      async function loadDownloads(showStatus = true) {
+        dlRefreshBtn.disabled = true;
+        if (showStatus) setDlStatus("Loading downloads…");
+        try {
+          const response = await fetch("/api/downloads");
+          if (!response.ok) await readError(response);
+          const data = await response.json();
+          const ttl = data.ttl_seconds || 2 * 24 * 60 * 60;
+          const hours = Math.round(ttl / 3600);
+          dlNote.textContent =
+            hours % 24 === 0
+              ? `Files are deleted automatically ${hours / 24} day${hours / 24 === 1 ? "" : "s"} after they are saved.`
+              : `Files are deleted automatically ${hours} hours after they are saved.`;
+          renderDownloads(data);
+        } catch (err) {
+          if (showStatus) setDlStatus(err.message, true);
+        } finally {
+          dlRefreshBtn.disabled = false;
+        }
+      }
+
+      let autoPolling = false;
+      function autoPollDownloads() {
+        if (autoPolling) return;
+        autoPolling = true;
+        loadDownloads(false).finally(() => {
+          autoPolling = false;
+        });
+      }
+
+      const AUTO_REFRESH_SECONDS = 30;
+      let refreshIn = AUTO_REFRESH_SECONDS;
+      const openedFolders = new Set();
+
+      dlRefreshBtn.addEventListener("click", () => {
+        refreshIn = AUTO_REFRESH_SECONDS;
+        loadDownloads();
+      });
+
+      setInterval(() => {
+        if (panelDownloads.hidden) {
+          refreshIn = AUTO_REFRESH_SECONDS;
+          dlRefreshBtn.textContent = "Refresh";
+          return;
+        }
+        dlRefreshBtn.textContent = `Refresh in ${refreshIn}s`;
+        refreshIn -= 1;
+        if (refreshIn <= 0) {
+          refreshIn = AUTO_REFRESH_SECONDS;
+          autoPollDownloads();
+        }
+      }, 1000);
+
+      setInterval(() => {
+        if (panelDownloads.hidden) return;
+        for (const el of document.querySelectorAll(".dl-meta[data-expires]")) {
+          const left = Math.max(0, (parseInt(el.dataset.expires, 10) || 0) - 1);
+          el.dataset.expires = String(left);
+          const row = el.closest(".dl-file");
+          if (left <= 0) {
+            if (row) row.style.display = "none";
+            continue;
+          }
+          el.textContent = (el.dataset.base || "") + formatExpiry(left);
+          if (row) {
+            if (left <= 5 * 60) row.classList.add("dl-file--urgent");
+            else row.classList.remove("dl-file--urgent");
+          }
+        }
+      }, 1000);
 
       const updateBtn = document.getElementById("updateBtn");
       let pendingUpdate = null;
