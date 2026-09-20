@@ -8,3 +8,7 @@ uploads/
 logs/
 *.log
 .jbeval
+
+# Keep the download folder in git, but ignore everything inside it
+download/*
+!download/.gitkeep
