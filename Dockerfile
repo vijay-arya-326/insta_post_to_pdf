@@ -26,8 +26,14 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     curl \
+    unzip \
     tzdata \
     && rm -rf /var/lib/apt/lists/*
+
+# Install Deno
+ENV DENO_INSTALL=/usr/local
+RUN curl -fsSL https://deno.land/install.sh | sh
+ENV PATH="/usr/local/bin:${PATH}"
 
 # Copy installed Python packages from builder
 COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
@@ -38,10 +44,13 @@ COPY app.py instagram.py pdf.py youtube.py ./
 COPY static/ ./static/
 COPY logs/ ./logs/
 
-# Create non-root user
-RUN useradd -m appuser && chown -R appuser:appuser /app
+# Create non-root user and writable data dirs
+RUN useradd -m appuser && mkdir -p /app/download /app/logs && chown -R appuser:appuser /app
 USER appuser
+
+# Persist downloads and logs even when no bind mounts are provided
+VOLUME ["/app/download", "/app/logs"]
 
 EXPOSE 8585
 
-CMD ["uvicorn", "app:app", "--host", "127.0.0.1", "--port", "8585"]
+CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8585"]
